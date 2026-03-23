@@ -261,7 +261,8 @@ const ProjectView = (() => {
       badge = `<span class="column-count">${row.count}</span>`;
     }
 
-    return `<div class="pv-row ${levelClass} ${isCollapsed ? 'is-collapsed' : ''}" style="height:${h}px;padding-left:${indent}px;" onclick="ProjectView.toggle('${colKey}')">
+    const divider = exporting && row.level === 1 ? 'border-top:3px solid var(--border-light, #475569);' : '';
+    return `<div class="pv-row ${levelClass} ${isCollapsed ? 'is-collapsed' : ''}" style="height:${h}px;padding-left:${indent}px;${divider}" onclick="ProjectView.toggle('${colKey}')">
       ${icon}
       <span class="pv-color-dot" style="background:${row.color};"></span>
       <span class="pv-row-name">${esc(row.name)}</span>
@@ -295,7 +296,8 @@ const ProjectView = (() => {
     }
 
     // Summary rows (levels 1-3)
-    if (!row.start || !row.end) return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;"></div>`;
+    const gridDivider = exporting && row.level === 1 ? 'border-top:3px solid var(--border-light, #475569);' : '';
+    if (!row.start || !row.end) return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;${gridDivider}"></div>`;
 
     const sd = dayDiff(startDate, row.start);
     const dur = Math.max(1, dayDiff(row.start, row.end) + 1);
@@ -316,7 +318,7 @@ const ProjectView = (() => {
     // Project Group (level 1) — single muted bar
     if (row.level === 1) {
       const barH = 22;
-      return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;">
+      return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;${gridDivider}">
         <div class="project-summary-bar" style="left:${barL}px;width:${barW}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.45;border-radius:4px;"></div>
         ${vaPill}
       </div>`;
