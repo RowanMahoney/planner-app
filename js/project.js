@@ -311,9 +311,18 @@ const ProjectView = (() => {
       </div>`;
     }
 
-    // Project or Project Group — segmented bar
+    // Project Group (level 1) — single muted bar
+    if (row.level === 1) {
+      const barH = 22;
+      return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;">
+        <div class="project-summary-bar" style="left:${barL}px;width:${barW}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.45;border-radius:4px;"></div>
+        ${vaPill}
+      </div>`;
+    }
+
+    // Project (level 2) — segmented bar by phase
     const total = Object.values(row.phaseCounts || {}).reduce((a, b) => a + b, 0);
-    const barH = row.level === 1 ? 22 : 18;
+    const barH = 18;
     let segHtml = '';
     if (total > 0) {
       segHtml = PHASE_ORDER
@@ -581,7 +590,10 @@ ${inlinedCSS}
     </div>
   </div>
   <div class="export-body">
-    <div class="export-list">${listHtml}</div>
+    <div class="export-list">
+      <div style="height:60px;border-bottom:1px solid ${border};display:flex;align-items:center;padding:0 16px;font-size:12px;font-weight:600;color:${textSec};text-transform:uppercase;letter-spacing:0.5px;background:${bgSec};">Project Hierarchy</div>
+      ${listHtml}
+    </div>
     <div class="export-timeline">
       <div style="width:${timelineWidth};position:relative;">${headerHtml}</div>
       <div style="width:${timelineWidth};position:relative;">${gridHtml}</div>
