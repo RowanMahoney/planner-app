@@ -20,9 +20,6 @@ const App = (() => {
     Store.on('bucketAdded', refreshView);
     Store.on('bucketUpdated', refreshView);
     Store.on('bucketDeleted', refreshView);
-    Store.on('pipelineAdded', refreshView);
-    Store.on('pipelineUpdated', refreshView);
-    Store.on('pipelineDeleted', refreshView);
     Store.on('groupAdded', refreshView);
     Store.on('groupUpdated', refreshView);
     Store.on('groupDeleted', refreshView);
@@ -86,18 +83,6 @@ const App = (() => {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
               Board
             </button>
-            <button class="nav-item" data-view="list" onclick="App.switchView('list')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
-              List
-            </button>
-            <button class="nav-item" data-view="gantt" onclick="App.switchView('gantt')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="7" y="10" width="14" height="4" rx="1"/><rect x="5" y="16" width="10" height="4" rx="1"/></svg>
-              Gantt Chart
-            </button>
-            <button class="nav-item" data-view="pipeline" onclick="App.switchView('pipeline')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              Pipelines
-            </button>
             <button class="nav-item" data-view="project" onclick="App.switchView('project')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
               Project
@@ -138,7 +123,11 @@ const App = (() => {
             </button>
             <button onclick="Store.exportJSON()" title="Export JSON">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-              Export
+              JSON
+            </button>
+            <button onclick="Store.exportCSV()" title="Export CSV">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h2M8 17h2M12 13h4M12 17h4"/></svg>
+              CSV
             </button>
             <button onclick="App.importFile()" title="Import JSON">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
@@ -206,9 +195,6 @@ const App = (() => {
     // Initialize views
     const viewContainer = document.getElementById('view-container');
     BoardView.init(viewContainer);
-    ListView.init(viewContainer);
-    GanttView.init(viewContainer);
-    PipelineView.init(viewContainer);
     ProjectView.init(viewContainer);
     TaskPanel.init();
 
@@ -295,7 +281,7 @@ const App = (() => {
       el.classList.toggle('active', el.dataset.view === view);
     });
     // Update title
-    const titles = { board: 'Board', list: 'List', gantt: 'Gantt Chart', pipeline: 'Pipelines', project: 'Project Overview' };
+    const titles = { board: 'Board', project: 'Project Overview' };
     const titleEl = document.getElementById('view-title');
     if (titleEl) titleEl.textContent = titles[view] || view;
     refreshView();
@@ -304,9 +290,6 @@ const App = (() => {
   function refreshView() {
     switch (currentView) {
       case 'board': BoardView.render(filters); break;
-      case 'list': ListView.render(filters); break;
-      case 'gantt': GanttView.render(filters); break;
-      case 'pipeline': PipelineView.render(filters); break;
       case 'project': ProjectView.render(filters); break;
     }
     renderSidebarLists();

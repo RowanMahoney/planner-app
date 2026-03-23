@@ -235,9 +235,6 @@
   box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
-/* Allow pills to overflow outside rows */
-.gantt-grid-row { overflow: visible; }
-.gantt-bar { overflow: visible; }
 
 /* ===== Project View ===== */
 .project-view {
