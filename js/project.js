@@ -253,7 +253,9 @@ const ProjectView = (() => {
     const icon = exporting ? '' : (row.level <= 3 ? `<svg class="pv-chevron ${isCollapsed ? 'collapsed' : ''}" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>` : '');
 
     let badge = '';
-    if (row.type === 'phase') {
+    if (exporting) {
+      badge = '';
+    } else if (row.type === 'phase') {
       badge = `<span class="project-phase-badge" style="background:${row.color}20;color:${row.color};border:1px solid ${row.color}40;">${row.count}</span>`;
     } else {
       badge = `<span class="column-count">${row.count}</span>`;
@@ -559,28 +561,25 @@ ${inlinedCSS}
   .export-legend { display:flex; gap:16px; margin-left:auto; }
   .export-legend span { display:flex; align-items:center; gap:4px; font-size:11px; color:${textSec}; }
   .export-legend .dot { width:10px; height:10px; border-radius:3px; }
-  /* Export overrides — ensure bars render correctly outside app layout */
-  html, body { height:auto !important; overflow:visible !important; }
-  .app-layout, .sidebar, .main-content, .view-container, .gantt-view, .project-view { height:auto !important; overflow:visible !important; }
-  .gantt-wrapper { height:auto !important; overflow:visible !important; display:flex !important; }
-  .gantt-task-list { display:flex !important; flex-direction:column !important; }
-  .gantt-task-list-body { flex:none !important; overflow:visible !important; }
-  .gantt-timeline { flex:1 !important; overflow:visible !important; display:block !important; }
-  .gantt-timeline-header { position:static !important; height:auto !important; overflow:visible !important; }
-  .gantt-timeline-body { height:auto !important; overflow:visible !important; }
-  .gantt-grid-row { position:relative !important; overflow:visible !important; }
-  .gantt-bar { position:absolute !important; display:flex !important; overflow:visible !important; }
-  .project-summary-bar { position:absolute !important; display:flex !important; overflow:hidden !important; }
-  .bar-progress { position:absolute !important; }
-  .gantt-weekend-col { position:absolute !important; }
-  .gantt-today-line { position:absolute !important; }
-  .gantt-header-months, .gantt-header-days { display:flex !important; }
-  .va-pill { position:absolute !important; }
+  /* Export overrides */
+  .ex-wrap { display:flex; overflow-x:auto; }
+  .ex-list { width:340px; min-width:340px; border-right:1px solid ${border}; background:${bgSec}; }
+  .ex-hdr { height:60px; display:flex; align-items:center; padding:0 16px; font-size:12px; font-weight:600; color:${textSec}; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid ${border}; box-sizing:content-box; }
+  .ex-tl-hdr { height:60px; display:flex; flex-direction:column; border-bottom:1px solid ${border}; box-sizing:content-box; }
+  .ex-tl-hdr .gantt-header-months { display:flex; height:28px; border-bottom:1px solid ${border}; box-sizing:border-box; }
+  .ex-tl-hdr .gantt-header-days { display:flex; height:32px; }
+  .ex-tl-body { position:relative; }
+  .gantt-grid-row { position:relative; overflow:visible; }
+  .gantt-bar { position:absolute; display:flex; overflow:visible; }
+  .project-summary-bar { position:absolute; display:flex; overflow:hidden; }
+  .bar-progress { position:absolute; }
+  .gantt-weekend-col { position:absolute; }
+  .gantt-today-line { position:absolute; }
+  .va-pill { position:absolute; }
 
   @media print {
     body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .gantt-wrapper { overflow:visible !important; }
-    .gantt-timeline { overflow:visible !important; }
+    .ex-wrap { overflow:visible; }
   }
 </style>
 </head><body data-theme="${document.documentElement.getAttribute('data-theme')}">
@@ -591,14 +590,14 @@ ${inlinedCSS}
       ${PHASE_ORDER.map(p => `<span><span class="dot" style="background:${PHASE_COLORS[p]}"></span>${p}</span>`).join('')}
     </div>
   </div>
-  <div class="gantt-wrapper">
-    <div class="gantt-task-list" style="width:340px;min-width:340px;">
-      <div class="gantt-task-list-header">Project Hierarchy</div>
-      <div class="gantt-task-list-body">${listHtml}</div>
+  <div class="ex-wrap">
+    <div class="ex-list">
+      <div class="ex-hdr">Project Hierarchy</div>
+      ${listHtml}
     </div>
-    <div class="gantt-timeline">
-      <div class="gantt-timeline-header" style="width:${timelineWidth};">${headerHtml}</div>
-      <div class="gantt-timeline-body" style="width:${timelineWidth};position:relative;">${gridHtml}</div>
+    <div style="flex:1;overflow:visible;">
+      <div class="ex-tl-hdr" style="width:${timelineWidth};">${headerHtml}</div>
+      <div class="ex-tl-body" style="width:${timelineWidth};">${gridHtml}</div>
     </div>
   </div>
 </body></html>`;
