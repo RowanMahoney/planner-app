@@ -559,13 +559,15 @@ ${inlinedCSS}
   .export-legend { display:flex; gap:16px; margin-left:auto; }
   .export-legend span { display:flex; align-items:center; gap:4px; font-size:11px; color:${textSec}; }
   .export-legend .dot { width:10px; height:10px; border-radius:3px; }
-  .export-body { display:flex; overflow-x:auto; }
-  .export-list { width:340px; min-width:340px; border-right:1px solid ${border}; background:${bgSec}; }
-  .export-timeline { flex:1; overflow:visible; }
-
   /* Export overrides — ensure bars render correctly outside app layout */
   html, body { height:auto !important; overflow:visible !important; }
-  .app-layout, .sidebar, .main-content, .view-container, .gantt-view, .project-view, .gantt-wrapper, .gantt-timeline, .gantt-timeline-body { height:auto !important; overflow:visible !important; }
+  .app-layout, .sidebar, .main-content, .view-container, .gantt-view, .project-view { height:auto !important; overflow:visible !important; }
+  .gantt-wrapper { height:auto !important; overflow:visible !important; display:flex !important; }
+  .gantt-task-list { display:flex !important; flex-direction:column !important; }
+  .gantt-task-list-body { flex:none !important; overflow:visible !important; }
+  .gantt-timeline { flex:1 !important; overflow:visible !important; display:block !important; }
+  .gantt-timeline-header { position:static !important; height:auto !important; overflow:visible !important; }
+  .gantt-timeline-body { height:auto !important; overflow:visible !important; }
   .gantt-grid-row { position:relative !important; overflow:visible !important; }
   .gantt-bar { position:absolute !important; display:flex !important; overflow:visible !important; }
   .project-summary-bar { position:absolute !important; display:flex !important; overflow:hidden !important; }
@@ -577,8 +579,8 @@ ${inlinedCSS}
 
   @media print {
     body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .export-body { overflow:visible !important; }
-    .export-timeline { overflow:visible !important; }
+    .gantt-wrapper { overflow:visible !important; }
+    .gantt-timeline { overflow:visible !important; }
   }
 </style>
 </head><body data-theme="${document.documentElement.getAttribute('data-theme')}">
@@ -589,14 +591,14 @@ ${inlinedCSS}
       ${PHASE_ORDER.map(p => `<span><span class="dot" style="background:${PHASE_COLORS[p]}"></span>${p}</span>`).join('')}
     </div>
   </div>
-  <div class="export-body">
-    <div class="export-list">
-      <div style="height:60px;border-bottom:1px solid ${border};display:flex;align-items:center;padding:0 16px;font-size:12px;font-weight:600;color:${textSec};text-transform:uppercase;letter-spacing:0.5px;background:${bgSec};">Project Hierarchy</div>
-      ${listHtml}
+  <div class="gantt-wrapper">
+    <div class="gantt-task-list" style="width:340px;min-width:340px;">
+      <div class="gantt-task-list-header">Project Hierarchy</div>
+      <div class="gantt-task-list-body">${listHtml}</div>
     </div>
-    <div class="export-timeline">
-      <div style="width:${timelineWidth};position:relative;">${headerHtml}</div>
-      <div style="width:${timelineWidth};position:relative;">${gridHtml}</div>
+    <div class="gantt-timeline">
+      <div class="gantt-timeline-header" style="width:${timelineWidth};">${headerHtml}</div>
+      <div class="gantt-timeline-body" style="width:${timelineWidth};position:relative;">${gridHtml}</div>
     </div>
   </div>
 </body></html>`;
