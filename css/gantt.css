@@ -317,7 +317,7 @@
   height: 24px;
   top: 9px;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: grab;
   transition: box-shadow var(--transition), filter var(--transition);
   display: flex;
   align-items: center;

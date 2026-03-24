@@ -7,6 +7,7 @@ const ProjectView = (() => {
   let zoom = 'week';
   let collapsed = new Set(); // stores row ids like "pg_X", "proj_X", "phase_X_Dev"
   let exporting = false;
+  let timelineStartDate = null; // stored for drag calculations
 
   const ZOOM_WIDTHS = { day: 40, week: 28, month: 10, quarter: 4, year: 1.5 };
 
@@ -181,6 +182,7 @@ const ProjectView = (() => {
     minDate.setDate(minDate.getDate() - (dow === 0 ? 6 : dow - 1));
     const totalDays = Math.ceil((maxDate - minDate) / (1000 * 60 * 60 * 24));
     const today = new Date(); today.setHours(0, 0, 0, 0);
+    timelineStartDate = new Date(minDate);
 
     const rows = buildRows(tasks);
 
@@ -309,9 +311,11 @@ const ProjectView = (() => {
       const vaHtml = vaPillHtml(taskVa, (sd + dur) * cellWidth - 4);
       return `<div class="gantt-grid-row" style="height:${h}px;">
         <div class="gantt-bar" style="left:${sd * cellWidth}px;width:${dur * cellWidth}px;background:${color};height:20px;top:${(h-20)/2}px;"
-             onclick="TaskPanel.open('${t.id}')">
+             data-task-id="${t.id}" onclick="ProjectView.barClick(event,'${t.id}')" onmousedown="ProjectView.startDrag(event,'${t.id}')">
           <div class="bar-progress" style="width:${t.progress}%;"></div>
           ${showLabel ? `<span class="bar-label">${esc(t.title)}</span>` : ''}
+          <div class="resize-handle left" onmousedown="ProjectView.startResize(event,'${t.id}','left')"></div>
+          <div class="resize-handle right" onmousedown="ProjectView.startResize(event,'${t.id}','right')"></div>
         </div>
         ${vaHtml}
       </div>`;
@@ -790,8 +794,112 @@ ${inlinedCSS}
     App.toast('Task added to ' + group.name, 'success');
   }
 
+  // ── Drag & Resize ──
+  let dragState = null;
+
+  function pxToDate(px) {
+    const days = Math.round(px / cellWidth);
+    const d = new Date(timelineStartDate);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function barClick(e, taskId) {
+    // Don't open panel if we just finished a drag
+    if (e.target.classList.contains('resize-handle')) return;
+    if (dragState && dragState.moved) return;
+    TaskPanel.open(taskId);
+  }
+
+  function startDrag(e, taskId) {
+    if (e.target.classList.contains('resize-handle')) return;
+    if (e.button !== 0) return;
+    const bar = e.currentTarget;
+    const task = Store.getTask(taskId);
+    if (!task) return;
+
+    const startX = e.clientX;
+    const origLeft = parseInt(bar.style.left);
+    const origWidth = parseInt(bar.style.width);
+
+    dragState = { taskId, moved: false, bar, origLeft, origWidth, startX, type: 'move' };
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      if (Math.abs(dx) > 3) dragState.moved = true;
+      bar.style.left = (origLeft + dx) + 'px';
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (!dragState.moved) { dragState = null; return; }
+
+      const newLeft = parseInt(bar.style.left);
+      const newStart = pxToDate(newLeft);
+      const daysMoved = Math.round((newLeft - origLeft) / cellWidth);
+      const oldEnd = task.dueDate ? new Date(task.dueDate + 'T00:00:00') : new Date(task.startDate + 'T00:00:00');
+      oldEnd.setDate(oldEnd.getDate() + daysMoved);
+      const newEnd = oldEnd.toISOString().slice(0, 10);
+
+      Store.updateTask(taskId, { startDate: newStart, dueDate: newEnd });
+      dragState = null;
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  }
+
+  function startResize(e, taskId, side) {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const bar = e.target.closest('.gantt-bar');
+    const task = Store.getTask(taskId);
+    if (!bar || !task) return;
+
+    const startX = e.clientX;
+    const origLeft = parseInt(bar.style.left);
+    const origWidth = parseInt(bar.style.width);
+
+    dragState = { taskId, moved: false, bar, origLeft, origWidth, startX, type: 'resize', side };
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      if (Math.abs(dx) > 3) dragState.moved = true;
+      if (side === 'right') {
+        bar.style.width = Math.max(cellWidth, origWidth + dx) + 'px';
+      } else {
+        const newLeft = origLeft + dx;
+        const newWidth = origWidth - dx;
+        if (newWidth >= cellWidth) {
+          bar.style.left = newLeft + 'px';
+          bar.style.width = newWidth + 'px';
+        }
+      }
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (!dragState.moved) { dragState = null; return; }
+
+      const newLeft = parseInt(bar.style.left);
+      const newWidth = parseInt(bar.style.width);
+      const newStart = pxToDate(newLeft);
+      const newEnd = pxToDate(newLeft + newWidth - cellWidth);
+
+      Store.updateTask(taskId, { startDate: newStart, dueDate: newEnd });
+      dragState = null;
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  }
+
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, setZoom, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase };
+  return { init, render, setZoom, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, barClick, startDrag, startResize };
 })();
