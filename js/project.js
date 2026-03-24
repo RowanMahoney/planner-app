@@ -51,6 +51,31 @@ const ProjectView = (() => {
     return { start: s, end: e };
   }
 
+  // ── Compute contiguous segments (merged intervals) for summary bars ──
+  function computeSegments(tasks) {
+    const intervals = tasks
+      .filter(t => t.startDate)
+      .map(t => ({
+        start: new Date(t.startDate + 'T00:00:00'),
+        end: new Date((t.dueDate || t.startDate) + 'T00:00:00')
+      }))
+      .sort((a, b) => a.start - b.start);
+    if (intervals.length === 0) return [];
+    const merged = [{ start: intervals[0].start, end: intervals[0].end }];
+    for (let i = 1; i < intervals.length; i++) {
+      const cur = intervals[i];
+      const last = merged[merged.length - 1];
+      // Merge if overlapping or adjacent (within 1 day gap)
+      const gap = (cur.start - last.end) / (1000 * 60 * 60 * 24);
+      if (gap <= 1) {
+        if (cur.end > last.end) last.end = cur.end;
+      } else {
+        merged.push({ start: cur.start, end: cur.end });
+      }
+    }
+    return merged;
+  }
+
   // ── Build the 4-level row tree ──
   function buildRows(tasks) {
     const projectGroups = Store.getProjectGroups();
@@ -93,7 +118,8 @@ const ProjectView = (() => {
       const range = dateRange(orphanTasks);
       const phaseCounts = countPhases(orphanTasks);
       const orphanVa = collectValidationActions(orphanTasks);
-      rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, phaseCounts, validationActions: orphanVa });
+      const orphanSegs = computeSegments(orphanTasks);
+      rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, segments: orphanSegs, phaseCounts, validationActions: orphanVa });
       if (!collapsed.has('proj___orphan__')) {
         addPhaseRows(rows, '__orphan__', orphanTasks);
       }
@@ -111,7 +137,8 @@ const ProjectView = (() => {
     const range = dateRange(pgTasks);
     const phaseCounts = countPhases(pgTasks);
     const vaActions = collectValidationActions(pgTasks);
-    rows.push({ level: 1, type: 'project-group', id: pgId, name: pgName, color: pgColor, count: pgTasks.length, ...range, phaseCounts, validationActions: vaActions });
+    const pgSegs = computeSegments(pgTasks);
+    rows.push({ level: 1, type: 'project-group', id: pgId, name: pgName, color: pgColor, count: pgTasks.length, ...range, segments: pgSegs, phaseCounts, validationActions: vaActions });
 
     if (collapsed.has('pg_' + pgId)) return;
 
@@ -121,7 +148,8 @@ const ProjectView = (() => {
       const range = dateRange(gTasks);
       const phaseCounts = countPhases(gTasks);
       const gVaActions = collectValidationActions(gTasks);
-      rows.push({ level: 2, type: 'project', id: g.id, name: g.name, color: g.color, count: gTasks.length, ...range, phaseCounts, validationActions: gVaActions });
+      const gSegs = computeSegments(gTasks);
+      rows.push({ level: 2, type: 'project', id: g.id, name: g.name, color: g.color, count: gTasks.length, ...range, segments: gSegs, phaseCounts, validationActions: gVaActions });
 
       if (!collapsed.has('proj_' + g.id)) {
         addPhaseRows(rows, g.id, gTasks);
@@ -136,7 +164,8 @@ const ProjectView = (() => {
       const range = dateRange(phaseTasks);
       const phaseId = projId + '_' + phase;
       const phaseVa = collectValidationActions(phaseTasks);
-      rows.push({ level: 3, type: 'phase', id: phaseId, projId: projId, phaseName: phase, name: phase, color: PHASE_COLORS[phase], count: phaseTasks.length, ...range, validationActions: phaseVa });
+      const phaseSegs = computeSegments(phaseTasks);
+      rows.push({ level: 3, type: 'phase', id: phaseId, projId: projId, phaseName: phase, name: phase, color: PHASE_COLORS[phase], count: phaseTasks.length, ...range, segments: phaseSegs, validationActions: phaseVa });
 
       if (!collapsed.has('phase_' + phaseId)) {
         phaseTasks.forEach(t => rows.push({ level: 4, type: 'task', task: t }));
@@ -323,50 +352,53 @@ const ProjectView = (() => {
 
     // Summary rows (levels 1-3)
     const gridDivider = exporting && row.level === 1 ? 'border-top:3px solid var(--border-light, #475569);' : '';
-    if (!row.start || !row.end) return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;${gridDivider}"></div>`;
+    const segments = row.segments || [];
+    if (segments.length === 0) return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;${gridDivider}"></div>`;
 
-    const sd = dayDiff(startDate, row.start);
-    const dur = Math.max(1, dayDiff(row.start, row.end) + 1);
-    const barL = sd * cellWidth;
-    const barW = dur * cellWidth;
+    // VA pill positioned after the last segment
+    const lastSeg = segments[segments.length - 1];
+    const lastEnd = dayDiff(startDate, lastSeg.end) + 1;
     const rowVa = row.validationActions || [];
-    const vaPill = vaPillHtml(rowVa, barL + barW - 4);
+    const vaPill = vaPillHtml(rowVa, lastEnd * cellWidth - 4);
 
     if (row.type === 'phase') {
-      // Solid bar in phase color
-      const barH = row.level === 3 ? 14 : 18;
-      return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">
-        <div class="project-summary-bar" style="left:${barL}px;width:${barW}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};border-radius:4px;opacity:0.75;"></div>
-        ${vaPill}
-      </div>`;
+      const barH = 14;
+      const barsHtml = segments.map(seg => {
+        const sl = dayDiff(startDate, seg.start) * cellWidth;
+        const sw = Math.max(1, dayDiff(seg.start, seg.end) + 1) * cellWidth;
+        return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};border-radius:4px;opacity:0.75;"></div>`;
+      }).join('');
+      return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">${barsHtml}${vaPill}</div>`;
     }
 
-    // Project Group (level 1) — single muted bar
+    // Project Group (level 1) — single muted bar per segment
     if (row.level === 1) {
       const barH = 22;
-      return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;${gridDivider}">
-        <div class="project-summary-bar" style="left:${barL}px;width:${barW}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.45;border-radius:4px;"></div>
-        ${vaPill}
-      </div>`;
+      const barsHtml = segments.map(seg => {
+        const sl = dayDiff(startDate, seg.start) * cellWidth;
+        const sw = Math.max(1, dayDiff(seg.start, seg.end) + 1) * cellWidth;
+        return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.45;border-radius:4px;"></div>`;
+      }).join('');
+      return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;${gridDivider}">${barsHtml}${vaPill}</div>`;
     }
 
-    // Project (level 2) — segmented bar by phase
+    // Project (level 2) — segmented bar by phase, per segment
     const total = Object.values(row.phaseCounts || {}).reduce((a, b) => a + b, 0);
     const barH = 18;
-    let segHtml = '';
-    if (total > 0) {
-      segHtml = PHASE_ORDER
-        .filter(p => (row.phaseCounts[p] || 0) > 0)
-        .map(p => `<div class="project-bar-segment" style="width:${((row.phaseCounts[p]/total)*100)}%;background:${PHASE_COLORS[p]};" title="${p}: ${row.phaseCounts[p]}"></div>`)
-        .join('');
-    }
+    const barsHtml = segments.map(seg => {
+      const sl = dayDiff(startDate, seg.start) * cellWidth;
+      const sw = Math.max(1, dayDiff(seg.start, seg.end) + 1) * cellWidth;
+      let segHtml = '';
+      if (total > 0) {
+        segHtml = PHASE_ORDER
+          .filter(p => (row.phaseCounts[p] || 0) > 0)
+          .map(p => `<div class="project-bar-segment" style="width:${((row.phaseCounts[p]/total)*100)}%;background:${PHASE_COLORS[p]};" title="${p}: ${row.phaseCounts[p]}"></div>`)
+          .join('');
+      }
+      return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;">${segHtml}</div>`;
+    }).join('');
 
-    return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">
-      <div class="project-summary-bar" style="left:${barL}px;width:${barW}px;height:${barH}px;top:${(h-barH)/2}px;">
-        ${segHtml}
-      </div>
-      ${vaPill}
-    </div>`;
+    return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">${barsHtml}${vaPill}</div>`;
   }
 
   // ── Timeline header ──
@@ -683,7 +715,8 @@ ${inlinedCSS}
         const range = dateRange(orphanTasks);
         const phaseCounts = countPhases(orphanTasks);
         const orphanVa = collectValidationActions(orphanTasks);
-        rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, phaseCounts, validationActions: orphanVa });
+        const orphanSegs = computeSegments(orphanTasks);
+        rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, segments: orphanSegs, phaseCounts, validationActions: orphanVa });
         if (!collapsed.has('proj___orphan__')) {
           addPhaseRows(rows, '__orphan__', orphanTasks);
         }
