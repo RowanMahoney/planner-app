@@ -296,6 +296,23 @@
 
 .pv-row:hover { background: var(--bg-hover); }
 
+.pv-add-btn {
+  opacity: 0;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: opacity 0.15s ease, color 0.15s ease;
+  padding: 2px;
+}
+
+.pv-row:hover .pv-add-btn {
+  opacity: 0.6;
+}
+
+.pv-add-btn:hover {
+  opacity: 1 !important;
+  color: var(--accent) !important;
+}
+
 .pv-level-1 {
   font-weight: 700;
   font-size: 13px;

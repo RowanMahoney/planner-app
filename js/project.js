@@ -253,6 +253,7 @@ const ProjectView = (() => {
     const icon = exporting ? '' : (row.level <= 3 ? `<svg class="pv-chevron ${isCollapsed ? 'collapsed' : ''}" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>` : '');
 
     let badge = '';
+    let addBtn = '';
     if (exporting) {
       badge = '';
     } else if (row.type === 'phase') {
@@ -260,12 +261,18 @@ const ProjectView = (() => {
     } else {
       badge = `<span class="column-count">${row.count}</span>`;
     }
+    if (!exporting && row.type === 'project') {
+      addBtn = `<button class="btn-icon pv-add-btn" onclick="event.stopPropagation();ProjectView.quickAddToProject('${row.id}')" title="Add task to ${esc(row.name)}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      </button>`;
+    }
 
     const divider = exporting && row.level === 1 ? 'border-top:3px solid var(--border-light, #475569);' : '';
     return `<div class="pv-row ${levelClass} ${isCollapsed ? 'is-collapsed' : ''}" style="height:${h}px;padding-left:${indent}px;${divider}" onclick="ProjectView.toggle('${colKey}')">
       ${icon}
       <span class="pv-color-dot" style="background:${row.color};"></span>
       <span class="pv-row-name">${esc(row.name)}</span>
+      ${addBtn}
       ${badge}
     </div>`;
   }
@@ -677,8 +684,49 @@ ${inlinedCSS}
       : `Actions - ${actions.map(a => esc(a)).join(', ')}`;
     return `<span class="va-pill" style="${VA_PILL_STYLE}left:${leftPx}px;bottom:0;">${text}</span>`;
   }
+  async function quickAddToProject(groupId) {
+    const group = Store.getGroup(groupId);
+    if (!group) return;
+    const pipelines = Store.getPipelines();
+    const fields = [
+      { type: 'text', key: 'title', label: 'Title', placeholder: 'Enter task title...', autofocus: true },
+      { type: 'select', key: 'priority', label: 'Priority', value: 'medium', options: [
+        { value: 'urgent', label: 'Urgent' }, { value: 'high', label: 'High' },
+        { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }
+      ]},
+    ];
+    if (pipelines.length > 0) {
+      fields.push({ type: 'select', key: 'pipelineId', label: 'Pipeline', value: pipelines[0]?.id || '', options: [
+        { value: '', label: 'None' },
+        ...pipelines.map(p => ({ value: p.id, label: p.name }))
+      ]});
+    }
+    fields.push(
+      { type: 'text', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10), placeholder: 'YYYY-MM-DD' },
+      { type: 'text', key: 'dueDate', label: 'Due Date', placeholder: 'YYYY-MM-DD' }
+    );
+    const result = await Modal.show({
+      title: `Add Task to ${group.name}`,
+      fields,
+      confirmText: 'Add Task'
+    });
+    if (!result || !result.title) return;
+
+    // Set stage to first stage of selected pipeline
+    if (result.pipelineId) {
+      const pl = Store.getPipeline(result.pipelineId);
+      if (pl && pl.stages.length > 0) result.stage = pl.stages[0];
+    }
+
+    const task = Store.addTask(result);
+    // Add to project group
+    group.taskIds.push(task.id);
+    Store.updateGroup(group.id, { taskIds: group.taskIds });
+    App.toast('Task added to ' + group.name, 'success');
+  }
+
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, setZoom, toggle, collapseAll, collapseToProjects, expandAll, exportView };
+  return { init, render, setZoom, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject };
 })();
