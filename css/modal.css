@@ -410,3 +410,48 @@
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
+
+/* Staff allocation badge */
+.pv-staff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.pv-staff-badge svg {
+  opacity: 0.7;
+}
+
+/* Task-level assignee avatars */
+.pv-assignees {
+  display: inline-flex;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.pv-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: white;
+  margin-left: -4px;
+  border: 1.5px solid var(--bg-secondary);
+}
+
+.pv-avatar:first-child {
+  margin-left: 0;
+}

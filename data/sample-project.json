@@ -35,15 +35,9 @@
     },
     {
       "id": "p2",
-      "name": "Validation",
-      "stages": ["Validation Planning", "Independent Review", "Challenger Model", "Findings Report", "Validation Approved"],
+      "name": "Validation & Regulatory Approval",
+      "stages": ["Validation Planning", "Independent Review", "Challenger Model", "Findings Report", "Validation Approved", "Submission Prep", "APRA Submission", "APRA Review", "Response to Queries", "APRA Cleared"],
       "color": "#f59e0b"
-    },
-    {
-      "id": "p3",
-      "name": "Regulatory Approval",
-      "stages": ["Submission Prep", "APRA Submission", "APRA Review", "Response to Queries", "APRA Cleared"],
-      "color": "#ef4444"
     },
     {
       "id": "p4",
@@ -167,7 +161,7 @@
       "title": "Small Corporate PD — APRA submission",
       "description": "Prepare and submit the APRA application for use of the Small Corporate IRB PD model for regulatory capital calculation.",
       "bucketId": "b1",
-      "pipelineId": "p3",
+      "pipelineId": "p2",
       "stage": "Submission Prep",
       "assignees": ["m4", "m1"],
       "labels": ["l1", "l4"],

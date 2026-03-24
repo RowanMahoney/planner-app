@@ -3,9 +3,10 @@
 
 const ProjectView = (() => {
   let container = null;
-  let cellWidth = 28;
-  let zoom = 'week';
+  let cellWidth = 1.5;
+  let zoom = 'year';
   let collapsed = new Set(); // stores row ids like "pg_X", "proj_X", "phase_X_Dev"
+  let defaultsApplied = false;
   let exporting = false;
   let timelineStartDate = null; // stored for drag calculations
 
@@ -13,12 +14,11 @@ const ProjectView = (() => {
 
   const PHASE_COLORS = {
     'Development': '#6366f1',
-    'Validation': '#f59e0b',
-    'Regulatory Approval': '#ef4444',
+    'Validation & Regulatory Approval': '#f59e0b',
     'Implementation': '#22c55e',
     'Other': '#94a3b8'
   };
-  const PHASE_ORDER = ['Development', 'Validation', 'Regulatory Approval', 'Implementation', 'Other'];
+  const PHASE_ORDER = ['Development', 'Validation & Regulatory Approval', 'Implementation', 'Other'];
 
   function init(el) { container = el; }
 
@@ -27,15 +27,15 @@ const ProjectView = (() => {
     if (!task.pipelineId) return 'Other';
     const p = Store.getPipeline(task.pipelineId);
     if (!p) return 'Other';
-    for (const phase of PHASE_ORDER) {
-      if (phase === 'Other') continue;
-      if (p.name.toLowerCase().includes(phase.toLowerCase())) return phase;
-    }
+    const pn = p.name.toLowerCase();
+    if (pn.includes('development')) return 'Development';
+    if (pn.includes('validation') || pn.includes('regulatory')) return 'Validation & Regulatory Approval';
+    if (pn.includes('implementation')) return 'Implementation';
     if (task.stage) {
-      for (const phase of PHASE_ORDER) {
-        if (phase === 'Other') continue;
-        if (task.stage.toLowerCase().includes(phase.toLowerCase())) return phase;
-      }
+      const sn = task.stage.toLowerCase();
+      if (sn.includes('development') || sn.includes('dev')) return 'Development';
+      if (sn.includes('validation') || sn.includes('regulatory') || sn.includes('apra')) return 'Validation & Regulatory Approval';
+      if (sn.includes('implementation') || sn.includes('go-live') || sn.includes('uat')) return 'Implementation';
     }
     return 'Other';
   }
@@ -51,29 +51,41 @@ const ProjectView = (() => {
     return { start: s, end: e };
   }
 
-  // ── Compute contiguous segments (merged intervals) for summary bars ──
-  function computeSegments(tasks) {
-    const intervals = tasks
-      .filter(t => t.startDate)
-      .map(t => ({
-        start: new Date(t.startDate + 'T00:00:00'),
-        end: new Date((t.dueDate || t.startDate) + 'T00:00:00')
-      }))
-      .sort((a, b) => a.start - b.start);
-    if (intervals.length === 0) return [];
-    const merged = [{ start: intervals[0].start, end: intervals[0].end }];
-    for (let i = 1; i < intervals.length; i++) {
-      const cur = intervals[i];
-      const last = merged[merged.length - 1];
-      // Merge if overlapping or adjacent (within 1 day gap)
-      const gap = (cur.start - last.end) / (1000 * 60 * 60 * 24);
-      if (gap <= 1) {
-        if (cur.end > last.end) last.end = cur.end;
-      } else {
-        merged.push({ start: cur.start, end: cur.end });
+  // ── Compute phase date ranges for a set of tasks ──
+  // Returns ordered array of { phase, start, end } with each phase extending to next phase's start
+  function computePhaseRanges(tasks) {
+    const phaseMap = {};
+    tasks.forEach(t => {
+      const phase = getTaskPhase(t);
+      if (!phaseMap[phase]) phaseMap[phase] = { start: null, end: null };
+      if (t.startDate) {
+        const s = new Date(t.startDate + 'T00:00:00');
+        if (!phaseMap[phase].start || s < phaseMap[phase].start) phaseMap[phase].start = s;
+      }
+      const ed = t.dueDate || t.startDate;
+      if (ed) {
+        const e = new Date(ed + 'T00:00:00');
+        if (!phaseMap[phase].end || e > phaseMap[phase].end) phaseMap[phase].end = e;
+      }
+    });
+    // Build ordered ranges (only phases that exist)
+    const ranges = PHASE_ORDER
+      .filter(p => phaseMap[p] && phaseMap[p].start)
+      .map(p => ({ phase: p, start: phaseMap[p].start, end: phaseMap[p].end, color: PHASE_COLORS[p] }));
+    // Extend each phase's end to meet the next phase's start (fill gaps)
+    for (let i = 0; i < ranges.length - 1; i++) {
+      if (ranges[i].end < ranges[i + 1].start) {
+        ranges[i].end = ranges[i + 1].start;
       }
     }
-    return merged;
+    return ranges;
+  }
+
+  // ── Count unique assignees across tasks ──
+  function countAssignees(tasks) {
+    const ids = new Set();
+    tasks.forEach(t => (t.assignees || []).forEach(a => ids.add(a)));
+    return ids.size;
   }
 
   // ── Build the 4-level row tree ──
@@ -118,8 +130,9 @@ const ProjectView = (() => {
       const range = dateRange(orphanTasks);
       const phaseCounts = countPhases(orphanTasks);
       const orphanVa = collectValidationActions(orphanTasks);
-      const orphanSegs = computeSegments(orphanTasks);
-      rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, segments: orphanSegs, phaseCounts, validationActions: orphanVa });
+      const orphanPhaseRanges = computePhaseRanges(orphanTasks);
+      const orphanAssignees = countAssignees(orphanTasks);
+      rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, phaseRanges: orphanPhaseRanges, phaseCounts, validationActions: orphanVa, assigneeCount: orphanAssignees });
       if (!collapsed.has('proj___orphan__')) {
         addPhaseRows(rows, '__orphan__', orphanTasks);
       }
@@ -137,8 +150,8 @@ const ProjectView = (() => {
     const range = dateRange(pgTasks);
     const phaseCounts = countPhases(pgTasks);
     const vaActions = collectValidationActions(pgTasks);
-    const pgSegs = computeSegments(pgTasks);
-    rows.push({ level: 1, type: 'project-group', id: pgId, name: pgName, color: pgColor, count: pgTasks.length, ...range, segments: pgSegs, phaseCounts, validationActions: vaActions });
+    const pgAssignees = countAssignees(pgTasks);
+    rows.push({ level: 1, type: 'project-group', id: pgId, name: pgName, color: pgColor, count: pgTasks.length, ...range, phaseCounts, validationActions: vaActions, assigneeCount: pgAssignees });
 
     if (collapsed.has('pg_' + pgId)) return;
 
@@ -148,8 +161,9 @@ const ProjectView = (() => {
       const range = dateRange(gTasks);
       const phaseCounts = countPhases(gTasks);
       const gVaActions = collectValidationActions(gTasks);
-      const gSegs = computeSegments(gTasks);
-      rows.push({ level: 2, type: 'project', id: g.id, name: g.name, color: g.color, count: gTasks.length, ...range, segments: gSegs, phaseCounts, validationActions: gVaActions });
+      const gPhaseRanges = computePhaseRanges(gTasks);
+      const gAssignees = countAssignees(gTasks);
+      rows.push({ level: 2, type: 'project', id: g.id, name: g.name, color: g.color, count: gTasks.length, ...range, phaseRanges: gPhaseRanges, phaseCounts, validationActions: gVaActions, assigneeCount: gAssignees });
 
       if (!collapsed.has('proj_' + g.id)) {
         addPhaseRows(rows, g.id, gTasks);
@@ -164,8 +178,8 @@ const ProjectView = (() => {
       const range = dateRange(phaseTasks);
       const phaseId = projId + '_' + phase;
       const phaseVa = collectValidationActions(phaseTasks);
-      const phaseSegs = computeSegments(phaseTasks);
-      rows.push({ level: 3, type: 'phase', id: phaseId, projId: projId, phaseName: phase, name: phase, color: PHASE_COLORS[phase], count: phaseTasks.length, ...range, segments: phaseSegs, validationActions: phaseVa });
+      const phaseAssignees = countAssignees(phaseTasks);
+      rows.push({ level: 3, type: 'phase', id: phaseId, projId: projId, phaseName: phase, name: phase, color: PHASE_COLORS[phase], count: phaseTasks.length, ...range, validationActions: phaseVa, assigneeCount: phaseAssignees });
 
       if (!collapsed.has('phase_' + phaseId)) {
         phaseTasks.forEach(t => rows.push({ level: 4, type: 'task', task: t }));
@@ -189,6 +203,14 @@ const ProjectView = (() => {
 
   // ── Main render ──
   function render(filters = {}) {
+    // Apply default collapsed-to-projects on first render
+    if (!defaultsApplied) {
+      defaultsApplied = true;
+      const groups = Store.getGroups();
+      groups.forEach(g => collapsed.add('proj_' + g.id));
+      collapsed.add('proj___orphan__');
+    }
+
     let tasks = filters.search || filters.assignee || filters.label || filters.priority
       ? Store.filterTasks(filters) : Store.getTasks();
     tasks = tasks.filter(t => t.startDate);
@@ -275,9 +297,14 @@ const ProjectView = (() => {
       const t = row.task;
       const phase = getTaskPhase(t);
       const pc = PHASE_COLORS[phase];
+      const assignees = (t.assignees || []).map(id => Store.getMember(id)).filter(Boolean);
+      const assigneeHtml = assignees.length > 0
+        ? `<span class="pv-assignees">${assignees.map(m => `<span class="pv-avatar" style="background:${m.color};" title="${esc(m.name)}">${esc(m.name.charAt(0))}</span>`).join('')}</span>`
+        : '';
       return `<div class="pv-row pv-level-4" style="height:${ROW_H[4]}px;padding-left:${INDENT[4]}px;" onclick="TaskPanel.open('${t.id}')">
         <span class="priority-dot" style="background:${pc};"></span>
         <span class="task-name">${esc(t.title)}</span>
+        ${assigneeHtml}
       </div>`;
     }
 
@@ -289,7 +316,13 @@ const ProjectView = (() => {
     const icon = exporting ? '' : (row.level <= 3 ? `<svg class="pv-chevron ${isCollapsed ? 'collapsed' : ''}" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>` : '');
 
     let badge = '';
+    let staffBadge = '';
     let addBtn = '';
+    // Staff allocation badge (shown on all summary rows)
+    const ac = row.assigneeCount || 0;
+    if (ac > 0) {
+      staffBadge = `<span class="pv-staff-badge" style="margin-left:auto;flex-shrink:0;" title="${ac} staff allocated"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>${ac}</span>`;
+    }
     if (exporting) {
       badge = '';
     } else if (row.type === 'phase') {
@@ -314,12 +347,14 @@ const ProjectView = (() => {
     }
 
     const divider = exporting && row.level === 1 ? 'border-top:3px solid var(--border-light, #475569);' : '';
-    return `<div class="pv-row ${levelClass} ${isCollapsed ? 'is-collapsed' : ''}" style="height:${h}px;padding-left:${indent}px;${divider}" onclick="ProjectView.toggle('${colKey}')">
+    const rowFlex = exporting ? 'display:flex;align-items:center;gap:6px;' : '';
+    return `<div class="pv-row ${levelClass} ${isCollapsed ? 'is-collapsed' : ''}" style="${rowFlex}height:${h}px;padding-left:${indent}px;padding-right:12px;${divider}" onclick="ProjectView.toggle('${colKey}')">
       ${icon}
       <span class="pv-color-dot" style="background:${row.color};"></span>
-      <span class="pv-row-name">${esc(row.name)}</span>
+      <span class="pv-row-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(row.name)}</span>
       ${addBtn}
       ${badge}
+      ${staffBadge}
     </div>`;
   }
 
@@ -352,50 +387,50 @@ const ProjectView = (() => {
 
     // Summary rows (levels 1-3)
     const gridDivider = exporting && row.level === 1 ? 'border-top:3px solid var(--border-light, #475569);' : '';
-    const segments = row.segments || [];
-    if (segments.length === 0) return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;${gridDivider}"></div>`;
+    if (!row.start || !row.end) return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;${gridDivider}"></div>`;
 
-    // VA pill positioned after the last segment
-    const lastSeg = segments[segments.length - 1];
-    const lastEnd = dayDiff(startDate, lastSeg.end) + 1;
+    const rowEndPx = (dayDiff(startDate, row.end) + 1) * cellWidth;
     const rowVa = row.validationActions || [];
-    const vaPill = vaPillHtml(rowVa, lastEnd * cellWidth - 4);
+    const vaPill = vaPillHtml(rowVa, rowEndPx - 4);
 
+    // Phase row (level 3) — single continuous bar
     if (row.type === 'phase') {
       const barH = 14;
-      const barsHtml = segments.map(seg => {
-        const sl = dayDiff(startDate, seg.start) * cellWidth;
-        const sw = Math.max(1, dayDiff(seg.start, seg.end) + 1) * cellWidth;
-        return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};border-radius:4px;opacity:0.75;"></div>`;
-      }).join('');
-      return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">${barsHtml}${vaPill}</div>`;
+      const sl = dayDiff(startDate, row.start) * cellWidth;
+      const sw = Math.max(1, dayDiff(row.start, row.end) + 1) * cellWidth;
+      return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">
+        <div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};border-radius:4px;opacity:0.75;"></div>
+        ${vaPill}</div>`;
     }
 
-    // Project Group (level 1) — single muted bar per segment
+    // Project Group (level 1) — single muted continuous bar
     if (row.level === 1) {
       const barH = 22;
-      const barsHtml = segments.map(seg => {
-        const sl = dayDiff(startDate, seg.start) * cellWidth;
-        const sw = Math.max(1, dayDiff(seg.start, seg.end) + 1) * cellWidth;
-        return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.45;border-radius:4px;"></div>`;
-      }).join('');
-      return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;${gridDivider}">${barsHtml}${vaPill}</div>`;
+      const sl = dayDiff(startDate, row.start) * cellWidth;
+      const sw = Math.max(1, dayDiff(row.start, row.end) + 1) * cellWidth;
+      return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;${gridDivider}">
+        <div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.45;border-radius:4px;"></div>
+        ${vaPill}</div>`;
     }
 
-    // Project (level 2) — segmented bar by phase, per segment
-    const total = Object.values(row.phaseCounts || {}).reduce((a, b) => a + b, 0);
+    // Project (level 2) — phase-colored sections based on actual date ranges
     const barH = 18;
-    const barsHtml = segments.map(seg => {
-      const sl = dayDiff(startDate, seg.start) * cellWidth;
-      const sw = Math.max(1, dayDiff(seg.start, seg.end) + 1) * cellWidth;
-      let segHtml = '';
-      if (total > 0) {
-        segHtml = PHASE_ORDER
-          .filter(p => (row.phaseCounts[p] || 0) > 0)
-          .map(p => `<div class="project-bar-segment" style="width:${((row.phaseCounts[p]/total)*100)}%;background:${PHASE_COLORS[p]};" title="${p}: ${row.phaseCounts[p]}"></div>`)
-          .join('');
-      }
-      return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;">${segHtml}</div>`;
+    const phaseRanges = row.phaseRanges || [];
+    if (phaseRanges.length === 0) {
+      // Fallback: single bar with project color
+      const sl = dayDiff(startDate, row.start) * cellWidth;
+      const sw = Math.max(1, dayDiff(row.start, row.end) + 1) * cellWidth;
+      return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">
+        <div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.7;border-radius:4px;"></div>
+        ${vaPill}</div>`;
+    }
+    const barsHtml = phaseRanges.map((pr, i) => {
+      const sl = dayDiff(startDate, pr.start) * cellWidth;
+      const sw = Math.max(1, dayDiff(pr.start, pr.end) + 1) * cellWidth;
+      const isFirst = i === 0;
+      const isLast = i === phaseRanges.length - 1;
+      const br = isFirst && isLast ? '4px' : isFirst ? '4px 0 0 4px' : isLast ? '0 4px 4px 0' : '0';
+      return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${pr.color};border-radius:${br};opacity:0.85;" title="${pr.phase}"></div>`;
     }).join('');
 
     return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">${barsHtml}${vaPill}</div>`;
@@ -614,6 +649,7 @@ const ProjectView = (() => {
 <style>
 ${inlinedCSS}
   * { box-sizing:border-box; margin:0; padding:0; }
+  .pv-staff-badge { margin-left:auto !important; }
   body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:${bg}; color:${text}; font-size:13px; }
   .export-header { padding:24px 32px; background:${bgSec}; border-bottom:1px solid ${border}; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   .export-header h1 { font-size:20px; font-weight:700; }
@@ -715,8 +751,9 @@ ${inlinedCSS}
         const range = dateRange(orphanTasks);
         const phaseCounts = countPhases(orphanTasks);
         const orphanVa = collectValidationActions(orphanTasks);
-        const orphanSegs = computeSegments(orphanTasks);
-        rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, segments: orphanSegs, phaseCounts, validationActions: orphanVa });
+        const orphanPhaseRanges = computePhaseRanges(orphanTasks);
+        const orphanAssignees = countAssignees(orphanTasks);
+        rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, phaseRanges: orphanPhaseRanges, phaseCounts, validationActions: orphanVa, assigneeCount: orphanAssignees });
         if (!collapsed.has('proj___orphan__')) {
           addPhaseRows(rows, '__orphan__', orphanTasks);
         }
