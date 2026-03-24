@@ -135,7 +135,7 @@ const ProjectView = (() => {
       const range = dateRange(phaseTasks);
       const phaseId = projId + '_' + phase;
       const phaseVa = collectValidationActions(phaseTasks);
-      rows.push({ level: 3, type: 'phase', id: phaseId, name: phase, color: PHASE_COLORS[phase], count: phaseTasks.length, ...range, validationActions: phaseVa });
+      rows.push({ level: 3, type: 'phase', id: phaseId, projId: projId, phaseName: phase, name: phase, color: PHASE_COLORS[phase], count: phaseTasks.length, ...range, validationActions: phaseVa });
 
       if (!collapsed.has('phase_' + phaseId)) {
         phaseTasks.forEach(t => rows.push({ level: 4, type: 'task', task: t }));
@@ -204,7 +204,12 @@ const ProjectView = (() => {
       </div>
       <div class="gantt-wrapper">
         <div class="gantt-task-list" style="width:340px;min-width:340px;">
-          <div class="gantt-task-list-header">Project Hierarchy</div>
+          <div class="gantt-task-list-header" style="justify-content:space-between;">
+            Project Hierarchy
+            <button class="btn-icon pv-add-btn" style="opacity:0.5;" onclick="App.addProjectGroup()" title="Add project group">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
           <div class="gantt-task-list-body" id="project-task-list-body">
             ${rows.map(r => renderListRow(r)).join('')}
           </div>
@@ -261,10 +266,20 @@ const ProjectView = (() => {
     } else {
       badge = `<span class="column-count">${row.count}</span>`;
     }
-    if (!exporting && row.type === 'project') {
-      addBtn = `<button class="btn-icon pv-add-btn" onclick="event.stopPropagation();ProjectView.quickAddToProject('${row.id}')" title="Add task to ${esc(row.name)}">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-      </button>`;
+    if (!exporting) {
+      if (row.type === 'project-group') {
+        addBtn = `<button class="btn-icon pv-add-btn" onclick="event.stopPropagation();ProjectView.quickAddProjectToGroup('${row.id}')" title="Add project to ${esc(row.name)}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>`;
+      } else if (row.type === 'project') {
+        addBtn = `<button class="btn-icon pv-add-btn" onclick="event.stopPropagation();ProjectView.quickAddToProject('${row.id}')" title="Add task to ${esc(row.name)}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>`;
+      } else if (row.type === 'phase') {
+        addBtn = `<button class="btn-icon pv-add-btn" onclick="event.stopPropagation();ProjectView.quickAddToPhase('${row.projId}','${row.phaseName}')" title="Add task to ${esc(row.name)}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>`;
+      }
     }
 
     const divider = exporting && row.level === 1 ? 'border-top:3px solid var(--border-light, #475569);' : '';
@@ -684,6 +699,56 @@ ${inlinedCSS}
       : `Actions - ${actions.map(a => esc(a)).join(', ')}`;
     return `<span class="va-pill" style="${VA_PILL_STYLE}left:${leftPx}px;bottom:0;">${text}</span>`;
   }
+  async function quickAddProjectToGroup(pgId) {
+    const pg = Store.getProjectGroup(pgId);
+    if (!pg) return;
+    const result = await Modal.show({
+      title: `Add Project to ${pg.name}`,
+      fields: [
+        { type: 'text', key: 'name', label: 'Project Name', placeholder: 'Enter project name...', autofocus: true },
+      ],
+      confirmText: 'Add Project'
+    });
+    if (!result || !result.name) return;
+    const group = Store.addGroup(result.name);
+    Store.updateGroup(group.id, { projectGroupId: pgId });
+    App.toast('Project added to ' + pg.name, 'success');
+  }
+
+  async function quickAddToPhase(projId, phaseName) {
+    const group = Store.getGroup(projId);
+    if (!group) return;
+    // Find the pipeline that matches this phase name
+    const pipelines = Store.getPipelines();
+    const matchedPipeline = pipelines.find(p => p.name.toLowerCase().includes(phaseName.toLowerCase()));
+
+    const result = await Modal.show({
+      title: `Add Task — ${phaseName}`,
+      fields: [
+        { type: 'text', key: 'title', label: 'Title', placeholder: 'Enter task title...', autofocus: true },
+        { type: 'select', key: 'priority', label: 'Priority', value: 'medium', options: [
+          { value: 'urgent', label: 'Urgent' }, { value: 'high', label: 'High' },
+          { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }
+        ]},
+        { type: 'text', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10), placeholder: 'YYYY-MM-DD' },
+        { type: 'text', key: 'dueDate', label: 'Due Date', placeholder: 'YYYY-MM-DD' }
+      ],
+      confirmText: 'Add Task'
+    });
+    if (!result || !result.title) return;
+
+    // Auto-assign pipeline and first stage
+    if (matchedPipeline) {
+      result.pipelineId = matchedPipeline.id;
+      if (matchedPipeline.stages.length > 0) result.stage = matchedPipeline.stages[0];
+    }
+
+    const task = Store.addTask(result);
+    group.taskIds.push(task.id);
+    Store.updateGroup(group.id, { taskIds: group.taskIds });
+    App.toast('Task added to ' + group.name + ' — ' + phaseName, 'success');
+  }
+
   async function quickAddToProject(groupId) {
     const group = Store.getGroup(groupId);
     if (!group) return;
@@ -728,5 +793,5 @@ ${inlinedCSS}
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, setZoom, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject };
+  return { init, render, setZoom, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase };
 })();
