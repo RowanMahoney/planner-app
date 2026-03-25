@@ -35,6 +35,10 @@ const TaskPanel = (() => {
     const checklistDone = task.checklist.filter(c => c.checked).length;
     const checklistTotal = task.checklist.length;
 
+    // Save panel scroll position before replacing DOM
+    const prevBody = panelEl.querySelector('.panel-body');
+    const savedScroll = prevBody ? prevBody.scrollTop : 0;
+
     panelEl.innerHTML = `
       <div class="panel-header">
         <span class="panel-header-title">Task Details</span>
@@ -220,6 +224,10 @@ const TaskPanel = (() => {
         open(currentTaskId);
       });
     }
+
+    // Restore panel scroll position
+    const newBody = panelEl.querySelector('.panel-body');
+    if (newBody) newBody.scrollTop = savedScroll;
   }
 
   function save() {

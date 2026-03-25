@@ -1,7 +1,7 @@
 // app.js — Main application controller
 
 const App = (() => {
-  let currentView = 'board';
+  let currentView = 'project';
   let filters = {};
   let theme = 'dark';
 
@@ -78,16 +78,6 @@ const App = (() => {
             </button>
           </div>
           <nav class="sidebar-nav">
-            <div class="nav-section-label">Views</div>
-            <button class="nav-item active" data-view="board" onclick="App.switchView('board')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-              Board
-            </button>
-            <button class="nav-item" data-view="project" onclick="App.switchView('project')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-              Project
-            </button>
-
             <div class="nav-section-label" style="margin-top:16px;">Team</div>
             <div id="sidebar-members"></div>
             <button class="nav-item" onclick="App.addMember()">
@@ -114,6 +104,13 @@ const App = (() => {
             <button class="nav-item" onclick="App.addGroup()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
               Add Project
+            </button>
+
+            <div class="nav-section-label" style="margin-top:16px;">Pipelines</div>
+            <div id="sidebar-pipelines"></div>
+            <button class="nav-item" onclick="App.addPipeline()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              Add Pipeline
             </button>
           </nav>
           <div class="sidebar-footer">
@@ -143,7 +140,7 @@ const App = (() => {
         <!-- Main -->
         <main class="main-content">
           <header class="main-header">
-            <h1 class="header-title" id="view-title">Board</h1>
+            <h1 class="header-title" id="view-title">Project</h1>
             <div class="header-actions">
               <div class="search-box">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -170,10 +167,6 @@ const App = (() => {
                   <button class="dropdown-item" onclick="App.clearFilters()" style="color:var(--accent);">Clear Filters</button>
                 </div>
               </div>
-              <button class="btn btn-primary" onclick="App.quickAddTask()">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                New Task
-              </button>
             </div>
           </header>
 
@@ -246,14 +239,22 @@ const App = (() => {
     // Project Groups
     const pgEl = document.getElementById('sidebar-project-groups');
     if (pgEl) {
-      pgEl.innerHTML = Store.getProjectGroups().map(pg => `
-        <div class="nav-item" style="cursor:pointer;">
+      pgEl.innerHTML = Store.getProjectGroups().map(pg => {
+        const visible = ProjectView.isProjectGroupVisible(pg.id);
+        return `<div class="nav-item" style="cursor:pointer;">
           <span style="width:10px;height:10px;border-radius:3px;background:${pg.color};flex-shrink:0;"></span>
           ${esc(pg.name)}
+          <button class="btn-icon sidebar-eye" onclick="event.stopPropagation();App.toggleProjectGroupVisibility('${pg.id}')" title="${visible ? 'Hide in project view' : 'Show in project view'}" style="margin-left:auto;opacity:${visible ? '0.7' : '0.3'};">
+            ${visible
+              ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+              : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+            }
+          </button>
           <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeProjectGroup('${pg.id}')" title="Remove project group">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
-        </div>`).join('');
+        </div>`;
+      }).join('');
     }
 
     // Groups (Projects)
@@ -271,6 +272,20 @@ const App = (() => {
           </button>
         </div>`;
       }).join('');
+    }
+
+    // Pipelines
+    const pipEl = document.getElementById('sidebar-pipelines');
+    if (pipEl) {
+      pipEl.innerHTML = Store.getPipelines().map(p => `
+        <div class="nav-item" style="cursor:pointer;" onclick="App.editPipeline('${p.id}')">
+          <span style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0;"></span>
+          ${esc(p.name)}
+          <span class="badge" style="margin-left:auto;">${p.stages.length}</span>
+          <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removePipeline('${p.id}')" title="Remove pipeline">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>`).join('');
     }
   }
 
@@ -436,7 +451,22 @@ const App = (() => {
     localStorage.setItem('planner_theme', t);
   }
 
-  function importFile() {
+  async function importFile() {
+    // Prefer File System Access API (gives us a handle for save-back)
+    if (window.showOpenFilePicker) {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
+        });
+        await Store.loadFromHandle(handle);
+        showApp();
+        toast('Project loaded', 'success');
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return; // user cancelled
+      }
+    }
+    // Fallback to file input
     document.getElementById('import-file-input').click();
   }
 
@@ -537,15 +567,72 @@ const App = (() => {
     toast('Project removed', 'success');
   }
 
+  async function addPipeline() {
+    const result = await Modal.show({
+      title: 'Add Pipeline',
+      fields: [
+        { type: 'text', key: 'name', label: 'Pipeline Name', placeholder: 'e.g. Development', autofocus: true },
+        { type: 'text', key: 'stages', label: 'Stages (comma-separated)', placeholder: 'e.g. Scoping, Build, Review, Done' }
+      ],
+      confirmText: 'Add Pipeline'
+    });
+    if (!result || !result.name) return;
+    const stages = (result.stages || '').split(',').map(s => s.trim()).filter(Boolean);
+    Store.addPipeline(result.name, stages.length > 0 ? stages : undefined);
+    toast('Pipeline added', 'success');
+  }
+
+  async function editPipeline(id) {
+    const pipeline = Store.getPipeline(id);
+    if (!pipeline) return;
+    const result = await Modal.show({
+      title: 'Edit Pipeline',
+      fields: [
+        { type: 'text', key: 'name', label: 'Pipeline Name', value: pipeline.name, autofocus: true },
+        { type: 'text', key: 'stages', label: 'Stages (comma-separated)', value: pipeline.stages.join(', ') }
+      ],
+      confirmText: 'Save Changes'
+    });
+    if (!result || !result.name) return;
+    const stages = (result.stages || '').split(',').map(s => s.trim()).filter(Boolean);
+    Store.updatePipeline(id, { name: result.name, stages });
+    toast('Pipeline updated', 'success');
+  }
+
+  function toggleProjectGroupVisibility(pgId) {
+    ProjectView.toggleProjectGroupVisibility(pgId);
+    renderSidebarLists();
+  }
+
+  async function removePipeline(id) {
+    const pipeline = Store.getPipeline(id);
+    if (!pipeline) return;
+    const confirmed = await Modal.confirm({
+      title: 'Remove Pipeline',
+      message: `Remove the "${pipeline.name}" pipeline? Tasks using it will have their pipeline cleared.`,
+      confirmText: 'Remove',
+      confirmClass: 'btn-danger'
+    });
+    if (!confirmed) return;
+    Store.deletePipeline(id);
+    toast('Pipeline removed', 'success');
+  }
+
   async function closeProject() {
+    const hasHandle = !!Store.getFileHandle();
     const confirmed = await Modal.confirm({
       title: 'Close Project',
-      message: 'Save the current project as a JSON file and return to the welcome screen? Your data in localStorage will be cleared.',
+      message: hasHandle
+        ? 'Save changes to the file and return to the welcome screen?'
+        : 'Save the current project as a JSON file and return to the welcome screen?',
       confirmText: 'Save & Close',
       confirmClass: 'btn-primary'
     });
     if (!confirmed) return;
-    Store.exportJSON();
+    // Save to the original file if we have a handle, otherwise download
+    const saved = await Store.saveToFile();
+    if (!saved) Store.exportJSON();
+    Store.clearFileHandle();
     localStorage.removeItem('planner_project_data');
     showWelcome();
     toast('Project saved and closed', 'success');
@@ -591,7 +678,8 @@ const App = (() => {
     init, switchView, refreshView, getFilters,
     onSearch, setFilter, clearFilters, toggleFilterMenu,
     quickAddTask, editProjectTitle,
-    addMember, addLabel, addProjectGroup, addGroup,
+    addMember, addLabel, addProjectGroup, addGroup, addPipeline,
+    editPipeline, removePipeline, toggleProjectGroupVisibility,
     removeMember, removeLabel, removeProjectGroup, removeGroup,
     toggleTheme, importFile, loadSample, newProject,
     handleDrop, handleFileSelect, closeProject, toast

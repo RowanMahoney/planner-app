@@ -411,6 +411,70 @@
   letter-spacing: 0.3px;
 }
 
+/* Project filter dropdown */
+.pv-filter-dropdown {
+  position: relative;
+}
+
+.pv-filter-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  padding: 4px 0;
+}
+
+.pv-filter-menu.open {
+  display: block;
+}
+
+.pv-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+  white-space: nowrap;
+}
+
+.pv-filter-item:hover {
+  background: var(--bg-hover);
+}
+
+.pv-filter-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Zoom slider */
+.pv-zoom-slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.pv-zoom-slider input[type="range"] {
+  width: 100px;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* Staff allocation badge */
 .pv-staff-badge {
   display: inline-flex;

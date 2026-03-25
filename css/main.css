@@ -509,7 +509,7 @@ a { color: var(--accent); text-decoration: none; }
 .dropdown-menu {
   position: absolute;
   top: 100%;
-  left: 0;
+  right: 0;
   min-width: 180px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);

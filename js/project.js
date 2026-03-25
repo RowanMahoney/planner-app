@@ -4,13 +4,18 @@
 const ProjectView = (() => {
   let container = null;
   let cellWidth = 1.5;
-  let zoom = 'year';
   let collapsed = new Set(); // stores row ids like "pg_X", "proj_X", "phase_X_Dev"
   let defaultsApplied = false;
   let exporting = false;
   let timelineStartDate = null; // stored for drag calculations
+  let projectFilter = new Set(); // empty = show all, or set of group ids to filter
+  let hiddenProjectGroups = new Set(); // project group ids hidden via sidebar eye toggle
+  let currentTotalDays = 365; // stored for fit-to-view calculation
+  let needsFitToView = true; // auto-fit on first render
+  let lastFilterKey = ''; // track filter changes for auto-fit
 
-  const ZOOM_WIDTHS = { day: 40, week: 28, month: 10, quarter: 4, year: 1.5 };
+  const ZOOM_SLIDER_MIN = 0.8;  // most zoomed out
+  const ZOOM_SLIDER_MAX = 50;   // most zoomed in
 
   const PHASE_COLORS = {
     'Development': '#6366f1',
@@ -94,9 +99,14 @@ const ProjectView = (() => {
     const groups = Store.getGroups();
     const rows = [];
 
+    // Apply project filter — only include matching groups
+    const filteredGroups = projectFilter.size > 0
+      ? groups.filter(g => projectFilter.has(g.id))
+      : groups;
+
     // Bucket groups by projectGroupId
     const pgMap = new Map(); // pgId -> [group, ...]
-    groups.forEach(g => {
+    filteredGroups.forEach(g => {
       const pgId = g.projectGroupId || '__ungrouped_pg__';
       if (!pgMap.has(pgId)) pgMap.set(pgId, []);
       pgMap.get(pgId).push(g);
@@ -105,8 +115,9 @@ const ProjectView = (() => {
     // Known project groups first
     const renderedPgIds = new Set();
     projectGroups.forEach(pg => {
+      if (hiddenProjectGroups.has(pg.id)) { renderedPgIds.add(pg.id); return; }
       const pgGroups = pgMap.get(pg.id) || [];
-      if (pgGroups.length === 0) return;
+      if (projectFilter.size > 0 && pgGroups.length === 0) return; // skip empty PGs when filtering
       renderedPgIds.add(pg.id);
       addProjectGroupRows(rows, pg.id, pg.name, pg.color, pgGroups, tasks);
     });
@@ -123,18 +134,20 @@ const ProjectView = (() => {
       addProjectGroupRows(rows, '__ungrouped_pg__', 'Ungrouped Projects', '#94a3b8', ungroupedGroups, tasks);
     }
 
-    // Tasks not in any group
-    const allGroupedTaskIds = new Set(groups.flatMap(g => g.taskIds));
-    const orphanTasks = tasks.filter(t => !allGroupedTaskIds.has(t.id));
-    if (orphanTasks.length > 0) {
-      const range = dateRange(orphanTasks);
-      const phaseCounts = countPhases(orphanTasks);
-      const orphanVa = collectValidationActions(orphanTasks);
-      const orphanPhaseRanges = computePhaseRanges(orphanTasks);
-      const orphanAssignees = countAssignees(orphanTasks);
-      rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, phaseRanges: orphanPhaseRanges, phaseCounts, validationActions: orphanVa, assigneeCount: orphanAssignees });
-      if (!collapsed.has('proj___orphan__')) {
-        addPhaseRows(rows, '__orphan__', orphanTasks);
+    // Tasks not in any group (skip when filtering to a specific project)
+    if (projectFilter.size === 0) {
+      const allGroupedTaskIds = new Set(groups.flatMap(g => g.taskIds));
+      const orphanTasks = tasks.filter(t => !allGroupedTaskIds.has(t.id));
+      if (orphanTasks.length > 0) {
+        const range = dateRange(orphanTasks);
+        const phaseCounts = countPhases(orphanTasks);
+        const orphanVa = collectValidationActions(orphanTasks);
+        const orphanPhaseRanges = computePhaseRanges(orphanTasks);
+        const orphanAssignees = countAssignees(orphanTasks);
+        rows.push({ level: 2, type: 'project', id: '__orphan__', name: 'Unassigned Tasks', color: '#64748b', count: orphanTasks.length, ...range, phaseRanges: orphanPhaseRanges, phaseCounts, validationActions: orphanVa, assigneeCount: orphanAssignees });
+        if (!collapsed.has('proj___orphan__')) {
+          addPhaseRows(rows, '__orphan__', orphanTasks);
+        }
       }
     }
 
@@ -145,7 +158,6 @@ const ProjectView = (() => {
     // Collect all tasks across all groups in this project group
     const pgTaskIds = new Set(pgGroups.flatMap(g => g.taskIds));
     const pgTasks = allTasks.filter(t => pgTaskIds.has(t.id));
-    if (pgTasks.length === 0) return;
 
     const range = dateRange(pgTasks);
     const phaseCounts = countPhases(pgTasks);
@@ -157,7 +169,6 @@ const ProjectView = (() => {
 
     pgGroups.forEach(g => {
       const gTasks = allTasks.filter(t => g.taskIds.includes(t.id) && t.startDate);
-      if (gTasks.length === 0) return;
       const range = dateRange(gTasks);
       const phaseCounts = countPhases(gTasks);
       const gVaActions = collectValidationActions(gTasks);
@@ -203,6 +214,13 @@ const ProjectView = (() => {
 
   // ── Main render ──
   function render(filters = {}) {
+    // Auto-fit when filters change
+    const filterKey = JSON.stringify(filters) + '|' + [...projectFilter].join(',');
+    if (filterKey !== lastFilterKey) {
+      if (lastFilterKey !== '') needsFitToView = true; // skip on very first call
+      lastFilterKey = filterKey;
+    }
+
     // Apply default collapsed-to-projects on first render
     if (!defaultsApplied) {
       defaultsApplied = true;
@@ -214,7 +232,6 @@ const ProjectView = (() => {
     let tasks = filters.search || filters.assignee || filters.label || filters.priority
       ? Store.filterTasks(filters) : Store.getTasks();
     tasks = tasks.filter(t => t.startDate);
-    cellWidth = ZOOM_WIDTHS[zoom];
 
     // Date range with padding
     const allDates = [];
@@ -231,19 +248,32 @@ const ProjectView = (() => {
     // Snap to Monday
     const dow = minDate.getDay();
     minDate.setDate(minDate.getDate() - (dow === 0 ? 6 : dow - 1));
-    const totalDays = Math.ceil((maxDate - minDate) / (1000 * 60 * 60 * 24));
+    const totalDays = Math.max(30, Math.ceil((maxDate - minDate) / (1000 * 60 * 60 * 24)));
+    currentTotalDays = totalDays;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     timelineStartDate = new Date(minDate);
+
+    // Auto-fit to viewport on first render
+    if (needsFitToView) {
+      needsFitToView = false;
+      const availableWidth = (container ? container.clientWidth : window.innerWidth) - 340;
+      if (availableWidth > 0 && totalDays > 0) {
+        cellWidth = Math.max(ZOOM_SLIDER_MIN, Math.min(ZOOM_SLIDER_MAX, availableWidth / totalDays));
+      }
+    }
 
     const rows = buildRows(tasks);
 
     const html = `<div class="project-view">
       <div class="project-controls">
-        <div class="gantt-zoom-group">
-          ${['day','week','month','quarter','year'].map(z =>
-            `<button class="gantt-zoom-btn ${zoom === z ? 'active' : ''}" onclick="ProjectView.setZoom('${z}')">${z.charAt(0).toUpperCase()+z.slice(1)}</button>`
-          ).join('')}
+        <div class="pv-zoom-slider">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M8 11h6"/></svg>
+          <input type="range" min="0" max="100" value="${zoomToSlider(cellWidth)}" id="pv-zoom-range" oninput="ProjectView.onSliderZoom(this.value)" />
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M8 11h6M11 8v6"/></svg>
         </div>
+        <button class="gantt-today-btn" onclick="ProjectView.fitToView()" title="Fit timeline to screen">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:3px;"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>Fit
+        </button>
         <button class="gantt-today-btn" onclick="ProjectView.collapseToProjects()">Projects</button>
         <button class="gantt-today-btn" onclick="ProjectView.collapseAll()">Collapse All</button>
         <button class="gantt-today-btn" onclick="ProjectView.expandAll()">Expand All</button>
@@ -280,11 +310,25 @@ const ProjectView = (() => {
       </div>
     </div>`;
 
+    // Save scroll positions before replacing DOM
+    const prevTl = document.getElementById('project-timeline');
+    const prevList = document.getElementById('project-task-list-body');
+    const savedScrollLeft = prevTl ? prevTl.scrollLeft : 0;
+    const savedScrollTop = prevTl ? prevTl.scrollTop : (prevList ? prevList.scrollTop : 0);
+
     container.innerHTML = html;
     setupScrollSync();
-    // Scroll to show the start of the timeline
+
+    // Restore scroll positions
     const tl = document.getElementById('project-timeline');
-    if (tl) tl.scrollLeft = 0;
+    const list = document.getElementById('project-task-list-body');
+    if (tl) {
+      tl.scrollLeft = savedScrollLeft;
+      tl.scrollTop = savedScrollTop;
+    }
+    if (list) {
+      list.scrollTop = savedScrollTop;
+    }
   }
 
   // ── Row heights by level ──
@@ -440,8 +484,9 @@ const ProjectView = (() => {
   function renderTimelineHeader(startDate, totalDays) {
     let topHtml = '', bottomHtml = '';
 
-    if (zoom === 'year') {
-      // Top row: years, bottom row: quarters
+    // Choose header format based on cellWidth thresholds
+    if (cellWidth < 3) {
+      // Very zoomed out: years / quarters
       const years = new Map();
       const quarters = new Map();
       for (let i = 0; i < totalDays; i++) {
@@ -456,9 +501,12 @@ const ProjectView = (() => {
         quarters.get(qk).count++;
       }
       years.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;font-weight:700;">${v.name}</div>`; });
-      quarters.forEach(v => { bottomHtml += `<div class="gantt-header-day" style="width:${v.count * cellWidth}px;min-width:${v.count * cellWidth}px;">${v.name}</div>`; });
-    } else if (zoom === 'quarter') {
-      // Top row: years, bottom row: months (short)
+      quarters.forEach(v => {
+        const w = v.count * cellWidth;
+        bottomHtml += `<div class="gantt-header-day" style="width:${w}px;min-width:${w}px;">${w > 30 ? v.name : ''}</div>`;
+      });
+    } else if (cellWidth < 8) {
+      // Medium-out: years / months
       const years = new Map();
       const months = new Map();
       for (let i = 0; i < totalDays; i++) {
@@ -471,9 +519,12 @@ const ProjectView = (() => {
         months.get(mk).count++;
       }
       years.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;font-weight:700;">${v.name}</div>`; });
-      months.forEach(v => { bottomHtml += `<div class="gantt-header-day" style="width:${v.count * cellWidth}px;min-width:${v.count * cellWidth}px;">${v.name}</div>`; });
+      months.forEach(v => {
+        const w = v.count * cellWidth;
+        bottomHtml += `<div class="gantt-header-day" style="width:${w}px;min-width:${w}px;">${w > 25 ? v.name : ''}</div>`;
+      });
     } else {
-      // Default: top row months, bottom row days
+      // Zoomed in: months / days
       const months = new Map();
       for (let i = 0; i < totalDays; i++) {
         const d = new Date(startDate); d.setDate(d.getDate() + i);
@@ -483,9 +534,9 @@ const ProjectView = (() => {
         const isToday = d.toDateString() === new Date().toDateString();
         const isWknd = d.getDay() === 0 || d.getDay() === 6;
         let label = '';
-        if (zoom === 'day') label = d.getDate();
-        else if (zoom === 'week') label = d.getDate();
-        else if (zoom === 'month') label = d.getDate() % 5 === 1 ? d.getDate() : '';
+        if (cellWidth >= 25) label = d.getDate();
+        else if (cellWidth >= 15) label = d.getDate() % 2 === 1 ? d.getDate() : '';
+        else label = d.getDate() % 5 === 1 ? d.getDate() : '';
         bottomHtml += `<div class="gantt-header-day ${isToday ? 'today' : ''} ${isWknd ? 'weekend' : ''}" style="width:${cellWidth}px;min-width:${cellWidth}px;" title="${d.toLocaleDateString()}">${label}</div>`;
       }
       months.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;">${v.name}</div>`; });
@@ -524,8 +575,119 @@ const ProjectView = (() => {
     if (line && tl) { tl.scrollLeft = Math.max(0, parseInt(line.style.left) - tl.clientWidth / 3); }
   }
 
+  // ── Zoom slider helpers (logarithmic scale) ──
+  function sliderToCellWidth(val) {
+    // val 0..100 → cellWidth ZOOM_SLIDER_MIN..ZOOM_SLIDER_MAX (log scale)
+    const t = val / 100;
+    return ZOOM_SLIDER_MIN * Math.pow(ZOOM_SLIDER_MAX / ZOOM_SLIDER_MIN, t);
+  }
+
+  function zoomToSlider(cw) {
+    // cellWidth → slider 0..100
+    const t = Math.log(cw / ZOOM_SLIDER_MIN) / Math.log(ZOOM_SLIDER_MAX / ZOOM_SLIDER_MIN);
+    return Math.round(Math.max(0, Math.min(100, t * 100)));
+  }
+
+  function onSliderZoom(val) {
+    cellWidth = sliderToCellWidth(parseFloat(val));
+    // Partial re-render: only update timeline content (preserves slider drag)
+    updateTimeline();
+  }
+
+  function fitToView() {
+    const tl = document.getElementById('project-timeline');
+    const availableWidth = tl ? tl.clientWidth : ((container ? container.clientWidth : window.innerWidth) - 340);
+    if (availableWidth > 0 && currentTotalDays > 0) {
+      cellWidth = Math.max(ZOOM_SLIDER_MIN, Math.min(ZOOM_SLIDER_MAX, availableWidth / currentTotalDays));
+    }
+    // Update slider position
+    const slider = document.getElementById('pv-zoom-range');
+    if (slider) slider.value = zoomToSlider(cellWidth);
+    updateTimeline();
+  }
+
+  function updateTimeline() {
+    let tasks = Store.getTasks().filter(t => t.startDate);
+    const filters = App.getFilters();
+    if (filters.search || filters.assignee || filters.label || filters.priority) {
+      tasks = Store.filterTasks(filters).filter(t => t.startDate);
+    }
+
+    const allDates = [];
+    tasks.forEach(t => {
+      if (t.startDate) allDates.push(new Date(t.startDate + 'T00:00:00'));
+      if (t.dueDate) allDates.push(new Date(t.dueDate + 'T00:00:00'));
+    });
+    if (allDates.length === 0) allDates.push(new Date());
+
+    let minDate = new Date(Math.min(...allDates));
+    let maxDate = new Date(Math.max(...allDates));
+    minDate.setDate(minDate.getDate() - 7);
+    maxDate.setDate(maxDate.getDate() + 14);
+    const dow = minDate.getDay();
+    minDate.setDate(minDate.getDate() - (dow === 0 ? 6 : dow - 1));
+    const totalDays = Math.max(30, Math.ceil((maxDate - minDate) / (1000 * 60 * 60 * 24)));
+    currentTotalDays = totalDays;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    timelineStartDate = new Date(minDate);
+
+    const rows = buildRows(tasks);
+    const timelineWidth = totalDays * cellWidth;
+
+    const headerEl = document.querySelector('.gantt-timeline-header');
+    const bodyEl = document.getElementById('project-timeline-body');
+    if (headerEl) {
+      headerEl.style.width = timelineWidth + 'px';
+      headerEl.innerHTML = renderTimelineHeader(minDate, totalDays);
+    }
+    if (bodyEl) {
+      bodyEl.style.width = timelineWidth + 'px';
+      bodyEl.innerHTML = renderWeekendColumns(minDate, totalDays)
+        + renderTodayLine(minDate, today, totalDays)
+        + rows.map(r => renderTimelineRow(r, minDate)).join('');
+    }
+  }
+
   // ── Controls ──
-  function setZoom(z) { zoom = z; render(App.getFilters()); }
+  function toggleFilterDropdown(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('pv-filter-menu');
+    if (!menu) return;
+    const isOpen = menu.classList.toggle('open');
+    if (isOpen) {
+      // Close on outside click
+      const closeHandler = () => { menu.classList.remove('open'); document.removeEventListener('click', closeHandler); };
+      setTimeout(() => document.addEventListener('click', closeHandler), 0);
+    }
+  }
+
+  function setProjectFilter(val) {
+    if (val === '__all__') {
+      projectFilter.clear();
+    }
+    needsFitToView = true;
+    render(App.getFilters());
+  }
+
+  function toggleProjectFilter(groupId) {
+    if (projectFilter.has(groupId)) {
+      projectFilter.delete(groupId);
+    } else {
+      projectFilter.add(groupId);
+    }
+    needsFitToView = true;
+    render(App.getFilters());
+  }
+
+  function toggleProjectGroupVisibility(pgId) {
+    if (hiddenProjectGroups.has(pgId)) hiddenProjectGroups.delete(pgId);
+    else hiddenProjectGroups.add(pgId);
+    render(App.getFilters());
+  }
+
+  function isProjectGroupVisible(pgId) {
+    return !hiddenProjectGroups.has(pgId);
+  }
 
   function toggle(key) {
     if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
@@ -728,7 +890,6 @@ ${inlinedCSS}
     projectGroups.forEach(pg => {
       if (!selectedPgIds.has(pg.id)) return;
       const pgGroups = pgMap.get(pg.id) || [];
-      if (pgGroups.length === 0) return;
       renderedPgIds.add(pg.id);
       addProjectGroupRows(rows, pg.id, pg.name, pg.color, pgGroups, tasks);
     });
@@ -971,5 +1132,5 @@ ${inlinedCSS}
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, setZoom, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, barClick, startDrag, startResize };
+  return { init, render, onSliderZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, barClick, startDrag, startResize };
 })();

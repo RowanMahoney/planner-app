@@ -3,6 +3,9 @@
 const Store = (() => {
   const STORAGE_KEY = 'planner_project_data';
   let data = null;
+  let fileHandle = null; // File System Access API handle for save-back
+  let autoSaveInterval = null;
+  const AUTO_SAVE_MS = 30000; // auto-save to file every 30 seconds
   const listeners = new Map();
 
   function createId() {
@@ -67,6 +70,70 @@ const Store = (() => {
     load(json);
     return json;
   }
+
+  // Load using File System Access API (preserves handle for save-back)
+  async function loadFromHandle(handle) {
+    fileHandle = handle;
+    const file = await handle.getFile();
+    const text = await file.text();
+    const json = JSON.parse(text);
+    load(json);
+    startAutoSaveToFile();
+    return json;
+  }
+
+  // Save back to the original file handle
+  async function saveToFile() {
+    if (!data) return false;
+    if (!fileHandle) {
+      // No handle — try to get one via Save As
+      return await saveToFileAs();
+    }
+    try {
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(data, null, 2));
+      await writable.close();
+      return true;
+    } catch (e) {
+      console.warn('Save to file failed:', e);
+      return false;
+    }
+  }
+
+  // Save As — pick a new file location
+  async function saveToFileAs() {
+    if (!data) return false;
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: (data.meta.title || 'project').replace(/\s+/g, '-').toLowerCase() + '.json',
+        types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
+      });
+      fileHandle = handle;
+      await saveToFile();
+      startAutoSaveToFile();
+      return true;
+    } catch (e) {
+      if (e.name !== 'AbortError') console.warn('Save As failed:', e);
+      return false;
+    }
+  }
+
+  function startAutoSaveToFile() {
+    if (autoSaveInterval) clearInterval(autoSaveInterval);
+    if (!fileHandle) return;
+    autoSaveInterval = setInterval(async () => {
+      if (fileHandle && data) {
+        await saveToFile();
+      }
+    }, AUTO_SAVE_MS);
+  }
+
+  function stopAutoSaveToFile() {
+    if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+  }
+
+  function getFileHandle() { return fileHandle; }
+  function clearFileHandle() { fileHandle = null; stopAutoSaveToFile(); }
 
   function exportJSON() {
     if (!data) return;
@@ -396,7 +463,9 @@ const Store = (() => {
   }
 
   return {
-    on, emit, load, loadFromStorage, loadFromFile, exportJSON, exportCSV,
+    on, emit, load, loadFromStorage, loadFromFile, loadFromHandle,
+    saveToFile, saveToFileAs, getFileHandle, clearFileHandle, startAutoSaveToFile, stopAutoSaveToFile,
+    exportJSON, exportCSV,
     getData, getTasks, getTask, getBuckets, getBucket, getBucketName,
     getPipelines, getPipeline, getPipelineName,
     getMembers, getMember, getMemberName,
