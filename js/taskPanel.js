@@ -54,6 +54,29 @@ const TaskPanel = (() => {
         </div>
 
         <div class="form-group">
+          <label class="form-label">Checklist ${checklistTotal > 0 ? `(${checklistDone}/${checklistTotal})` : ''}</label>
+          ${checklistTotal > 0 ? `
+          <div class="task-progress-bar" style="margin-bottom:8px;">
+            <div class="task-progress-fill" style="width:${checklistTotal > 0 ? (checklistDone/checklistTotal*100) : 0}%;background:var(--accent);"></div>
+          </div>` : ''}
+          <div id="panel-checklist">
+            ${task.checklist.map((item, i) => `
+              <div class="checklist-item ${item.checked ? 'checked' : ''}">
+                <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="TaskPanel.toggleCheck(${i})" />
+                <span>${escHTML(item.text)}</span>
+                <button class="btn-icon" onclick="TaskPanel.removeCheck(${i})" style="padding:2px;">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+              </div>`).join('')}
+          </div>
+          <div class="checklist-add">
+            <input id="panel-check-input" placeholder="Add checklist item..."
+                   onkeydown="if(event.key==='Enter')TaskPanel.addCheck()" />
+            <button class="btn btn-secondary" onclick="TaskPanel.addCheck()">Add</button>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">Description</label>
           <textarea class="form-textarea" id="panel-desc" placeholder="Add a description...">${escHTML(task.description)}</textarea>
         </div>
@@ -96,7 +119,7 @@ const TaskPanel = (() => {
         </div>
 
         <div class="form-group">
-          <label class="form-label">Pipeline</label>
+          <label class="form-label">Phase</label>
           <select class="form-select" id="panel-pipeline">
             <option value="">None</option>
             ${pipelines.map(p => `<option value="${p.id}" ${p.id === task.pipelineId ? 'selected' : ''}>${escHTML(p.name)}</option>`).join('')}
@@ -107,6 +130,7 @@ const TaskPanel = (() => {
         <div class="form-group">
           <label class="form-label">Stage</label>
           <select class="form-select" id="panel-stage">
+            <option value="" ${!task.stage ? 'selected' : ''}>None</option>
             ${pipeline.stages.map(s => `<option value="${s}" ${s === task.stage ? 'selected' : ''}>${s}</option>`).join('')}
           </select>
         </div>` : ''}
@@ -168,29 +192,6 @@ const TaskPanel = (() => {
             <input id="panel-va-input" placeholder="e.g. 1234"
                    onkeydown="if(event.key==='Enter')TaskPanel.addValidationAction()" />
             <button class="btn btn-secondary" onclick="TaskPanel.addValidationAction()">Add</button>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Checklist ${checklistTotal > 0 ? `(${checklistDone}/${checklistTotal})` : ''}</label>
-          ${checklistTotal > 0 ? `
-          <div class="task-progress-bar" style="margin-bottom:8px;">
-            <div class="task-progress-fill" style="width:${checklistTotal > 0 ? (checklistDone/checklistTotal*100) : 0}%;background:var(--accent);"></div>
-          </div>` : ''}
-          <div id="panel-checklist">
-            ${task.checklist.map((item, i) => `
-              <div class="checklist-item ${item.checked ? 'checked' : ''}">
-                <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="TaskPanel.toggleCheck(${i})" />
-                <span>${escHTML(item.text)}</span>
-                <button class="btn-icon" onclick="TaskPanel.removeCheck(${i})" style="padding:2px;">
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                </button>
-              </div>`).join('')}
-          </div>
-          <div class="checklist-add">
-            <input id="panel-check-input" placeholder="Add checklist item..."
-                   onkeydown="if(event.key==='Enter')TaskPanel.addCheck()" />
-            <button class="btn btn-secondary" onclick="TaskPanel.addCheck()">Add</button>
           </div>
         </div>
 

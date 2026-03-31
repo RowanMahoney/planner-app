@@ -5,10 +5,12 @@ const App = (() => {
   let filters = {};
   let theme = 'dark';
 
-  function init() {
+  async function init() {
     // Try loading from localStorage first
     if (Store.loadFromStorage()) {
       showApp();
+      // Restore file handle from IndexedDB so save-back works after reload
+      await Store.restoreFileHandle();
     } else {
       showWelcome();
     }
@@ -40,7 +42,7 @@ const App = (() => {
         <div class="welcome-card">
           <div style="width:56px;height:56px;background:var(--accent);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:24px;font-weight:700;color:white;">P</div>
           <h1>Planner</h1>
-          <p>A local project management tool for your team. Track tasks, manage pipelines, and visualize progress with interactive Gantt charts.</p>
+          <p>A local project management tool for your team. Track tasks, manage phases, and visualize progress with interactive Gantt charts.</p>
           <div class="welcome-actions">
             <button class="btn btn-primary" onclick="App.loadSample()">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M13 2v7h7"/></svg>
@@ -51,7 +53,7 @@ const App = (() => {
               New Empty Project
             </button>
             <div class="drop-zone" id="drop-zone"
-                 onclick="document.getElementById('file-input').click()"
+                 onclick="App.openFile()"
                  ondragover="event.preventDefault();this.classList.add('drag-over')"
                  ondragleave="this.classList.remove('drag-over')"
                  ondrop="App.handleDrop(event)">
@@ -106,14 +108,21 @@ const App = (() => {
               Add Project
             </button>
 
-            <div class="nav-section-label" style="margin-top:16px;">Pipelines</div>
+            <div class="nav-section-label" style="margin-top:16px;">Phases</div>
             <div id="sidebar-pipelines"></div>
             <button class="nav-item" onclick="App.addPipeline()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              Add Pipeline
+              Add Phase
             </button>
           </nav>
           <div class="sidebar-footer">
+            <div id="save-status" style="width:100%;padding:4px 0;font-size:10px;color:var(--text-muted);text-align:center;">
+              ${Store.hasFileSystemAccess()
+                ? (Store.getFileHandle()
+                  ? '<span style="color:var(--accent);">● Auto-saving to file</span>'
+                  : 'Saving to browser storage')
+                : '<span title="Open via localhost for file save-back">Saving to browser storage only</span>'}
+            </div>
             <button onclick="App.toggleTheme()" title="Toggle theme">
               <svg id="theme-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
               Theme
@@ -243,14 +252,14 @@ const App = (() => {
         const visible = ProjectView.isProjectGroupVisible(pg.id);
         return `<div class="nav-item" style="cursor:pointer;">
           <span style="width:10px;height:10px;border-radius:3px;background:${pg.color};flex-shrink:0;"></span>
-          ${esc(pg.name)}
-          <button class="btn-icon sidebar-eye" onclick="event.stopPropagation();App.toggleProjectGroupVisibility('${pg.id}')" title="${visible ? 'Hide in project view' : 'Show in project view'}" style="margin-left:auto;opacity:${visible ? '0.7' : '0.3'};">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pg.name)}</span>
+          <button class="btn-icon sidebar-eye" onclick="event.stopPropagation();App.toggleProjectGroupVisibility('${pg.id}')" title="${visible ? 'Hide in project view' : 'Show in project view'}" style="flex-shrink:0;opacity:${visible ? '0.7' : '0.3'};">
             ${visible
               ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
               : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
             }
           </button>
-          <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeProjectGroup('${pg.id}')" title="Remove project group">
+          <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeProjectGroup('${pg.id}')" title="Remove project group" style="flex-shrink:0;">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>`;
@@ -282,7 +291,7 @@ const App = (() => {
           <span style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0;"></span>
           ${esc(p.name)}
           <span class="badge" style="margin-left:auto;">${p.stages.length}</span>
-          <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removePipeline('${p.id}')" title="Remove pipeline">
+          <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removePipeline('${p.id}')" title="Remove phase">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>`).join('');
@@ -451,9 +460,9 @@ const App = (() => {
     localStorage.setItem('planner_theme', t);
   }
 
-  async function importFile() {
+  async function openFile() {
     // Prefer File System Access API (gives us a handle for save-back)
-    if (window.showOpenFilePicker) {
+    if (Store.hasFileSystemAccess()) {
       try {
         const [handle] = await window.showOpenFilePicker({
           types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
@@ -464,10 +473,16 @@ const App = (() => {
         return;
       } catch (e) {
         if (e.name === 'AbortError') return; // user cancelled
+        console.warn('File picker failed, falling back:', e);
       }
     }
-    // Fallback to file input
-    document.getElementById('import-file-input').click();
+    // Fallback to file input (file:// or unsupported browser)
+    const input = document.getElementById('file-input') || document.getElementById('import-file-input');
+    if (input) input.click();
+  }
+
+  async function importFile() {
+    return openFile();
   }
 
   async function loadSample() {
@@ -499,12 +514,28 @@ const App = (() => {
   async function handleDrop(e) {
     e.preventDefault();
     e.currentTarget.classList.remove('drag-over');
+    // Try to get a file handle from the drop (requires secure context)
+    const item = e.dataTransfer.items && e.dataTransfer.items[0];
+    if (Store.hasFileSystemAccess() && item && item.kind === 'file' && item.getAsFileSystemHandle) {
+      try {
+        const handle = await item.getAsFileSystemHandle();
+        if (handle && handle.kind === 'file' && handle.name.endsWith('.json')) {
+          await Store.loadFromHandle(handle);
+          showApp();
+          toast('Project loaded', 'success');
+          return;
+        }
+      } catch (err) {
+        console.warn('Drop handle failed, falling back:', err);
+      }
+    }
+    // Fallback: plain File object (no save-back support)
     const file = e.dataTransfer.files[0];
     if (file && file.name.endsWith('.json')) {
       try {
         await Store.loadFromFile(file);
         showApp();
-        toast('Project loaded', 'success');
+        toast('Project loaded (save-back unavailable — use Import to enable)', 'info');
       } catch (err) {
         toast('Invalid file: ' + err.message, 'error');
       }
@@ -569,26 +600,26 @@ const App = (() => {
 
   async function addPipeline() {
     const result = await Modal.show({
-      title: 'Add Pipeline',
+      title: 'Add Phase',
       fields: [
-        { type: 'text', key: 'name', label: 'Pipeline Name', placeholder: 'e.g. Development', autofocus: true },
+        { type: 'text', key: 'name', label: 'Phase Name', placeholder: 'e.g. Development', autofocus: true },
         { type: 'text', key: 'stages', label: 'Stages (comma-separated)', placeholder: 'e.g. Scoping, Build, Review, Done' }
       ],
-      confirmText: 'Add Pipeline'
+      confirmText: 'Add Phase'
     });
     if (!result || !result.name) return;
     const stages = (result.stages || '').split(',').map(s => s.trim()).filter(Boolean);
     Store.addPipeline(result.name, stages.length > 0 ? stages : undefined);
-    toast('Pipeline added', 'success');
+    toast('Phase added', 'success');
   }
 
   async function editPipeline(id) {
     const pipeline = Store.getPipeline(id);
     if (!pipeline) return;
     const result = await Modal.show({
-      title: 'Edit Pipeline',
+      title: 'Edit Phase',
       fields: [
-        { type: 'text', key: 'name', label: 'Pipeline Name', value: pipeline.name, autofocus: true },
+        { type: 'text', key: 'name', label: 'Phase Name', value: pipeline.name, autofocus: true },
         { type: 'text', key: 'stages', label: 'Stages (comma-separated)', value: pipeline.stages.join(', ') }
       ],
       confirmText: 'Save Changes'
@@ -596,7 +627,7 @@ const App = (() => {
     if (!result || !result.name) return;
     const stages = (result.stages || '').split(',').map(s => s.trim()).filter(Boolean);
     Store.updatePipeline(id, { name: result.name, stages });
-    toast('Pipeline updated', 'success');
+    toast('Phase updated', 'success');
   }
 
   function toggleProjectGroupVisibility(pgId) {
@@ -608,30 +639,48 @@ const App = (() => {
     const pipeline = Store.getPipeline(id);
     if (!pipeline) return;
     const confirmed = await Modal.confirm({
-      title: 'Remove Pipeline',
-      message: `Remove the "${pipeline.name}" pipeline? Tasks using it will have their pipeline cleared.`,
+      title: 'Remove Phase',
+      message: `Remove the "${pipeline.name}" phase? Tasks using it will have their phase cleared.`,
       confirmText: 'Remove',
       confirmClass: 'btn-danger'
     });
     if (!confirmed) return;
     Store.deletePipeline(id);
-    toast('Pipeline removed', 'success');
+    toast('Phase removed', 'success');
   }
 
   async function closeProject() {
-    const hasHandle = !!Store.getFileHandle();
-    const confirmed = await Modal.confirm({
-      title: 'Close Project',
-      message: hasHandle
-        ? 'Save changes to the file and return to the welcome screen?'
-        : 'Save the current project as a JSON file and return to the welcome screen?',
-      confirmText: 'Save & Close',
-      confirmClass: 'btn-primary'
-    });
+    const canSaveBack = Store.hasFileSystemAccess() && !!Store.getFileHandle();
+    const canSaveAs = Store.hasFileSystemAccess();
+
+    let message, confirmText;
+    if (canSaveBack) {
+      message = 'Save changes to the original file and return to the welcome screen?';
+      confirmText = 'Save & Close';
+    } else if (canSaveAs) {
+      message = 'Choose a location to save the project, then return to the welcome screen.';
+      confirmText = 'Save As & Close';
+    } else {
+      message = 'Download the project as a JSON file and return to the welcome screen? Your data is also saved in the browser automatically.';
+      confirmText = 'Download & Close';
+    }
+
+    const confirmed = await Modal.confirm({ title: 'Close Project', message, confirmText, confirmClass: 'btn-primary' });
     if (!confirmed) return;
-    // Save to the original file if we have a handle, otherwise download
-    const saved = await Store.saveToFile();
-    if (!saved) Store.exportJSON();
+
+    if (canSaveBack) {
+      const saved = await Store.saveToFile();
+      if (!saved) {
+        toast('Save failed — downloading instead', 'error');
+        Store.exportJSON();
+      }
+    } else if (canSaveAs) {
+      const saved = await Store.saveToFileAs();
+      if (!saved) return; // user cancelled
+    } else {
+      Store.exportJSON();
+    }
+
     Store.clearFileHandle();
     localStorage.removeItem('planner_project_data');
     showWelcome();
@@ -681,7 +730,7 @@ const App = (() => {
     addMember, addLabel, addProjectGroup, addGroup, addPipeline,
     editPipeline, removePipeline, toggleProjectGroupVisibility,
     removeMember, removeLabel, removeProjectGroup, removeGroup,
-    toggleTheme, importFile, loadSample, newProject,
+    toggleTheme, openFile, importFile, loadSample, newProject,
     handleDrop, handleFileSelect, closeProject, toast
   };
 })();

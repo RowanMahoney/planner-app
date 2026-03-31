@@ -25,7 +25,101 @@ const ProjectView = (() => {
   };
   const PHASE_ORDER = ['Development', 'Validation & Regulatory Approval', 'Implementation', 'Other'];
 
-  function init(el) { container = el; }
+  let tooltipEl = null;
+  let tooltipTimeout = null;
+
+  function init(el) {
+    container = el;
+    // Create tooltip element once
+    if (!tooltipEl) {
+      tooltipEl = document.createElement('div');
+      tooltipEl.className = 'task-tooltip';
+      document.body.appendChild(tooltipEl);
+    }
+  }
+
+  function showTaskTooltip(e, taskId) {
+    const t = Store.getTask(taskId);
+    if (!t || !tooltipEl) return;
+    clearTimeout(tooltipTimeout);
+
+    const phase = getTaskPhase(t);
+    const color = PHASE_COLORS[phase];
+    const pip = t.pipelineId ? Store.getPipeline(t.pipelineId) : null;
+    const assignees = (t.assignees || []).map(id => Store.getMember(id)).filter(Boolean);
+    const checkDone = t.checklist ? t.checklist.filter(c => c.checked).length : 0;
+    const checkTotal = t.checklist ? t.checklist.length : 0;
+    const priorityColors = { urgent: '#ef4444', high: '#f59e0b', medium: '#3b82f6', low: '#6b7280' };
+
+    let html = `<div class="task-tooltip-title">${esc(t.title)}</div>`;
+    html += `<div class="task-tooltip-progress"><div class="task-tooltip-progress-fill" style="width:${t.progress}%;background:${color};"></div></div>`;
+    html += `<div class="task-tooltip-rows" style="margin-top:8px;">`;
+    html += `<div class="task-tooltip-row"><span class="tt-label">Progress</span><span class="tt-value">${t.progress}%</span></div>`;
+    html += `<div class="task-tooltip-row"><span class="tt-label">Priority</span><span class="tt-value" style="color:${priorityColors[t.priority] || '#6b7280'};">${(t.priority || 'medium').charAt(0).toUpperCase() + (t.priority || 'medium').slice(1)}</span></div>`;
+    if (t.startDate || t.dueDate) {
+      const dates = [t.startDate, t.dueDate].filter(Boolean).join(' → ');
+      html += `<div class="task-tooltip-row"><span class="tt-label">Dates</span><span class="tt-value">${dates}</span></div>`;
+    }
+    if (pip) {
+      html += `<div class="task-tooltip-row"><span class="tt-label">Phase</span><span class="tt-value">${esc(pip.name)}</span></div>`;
+      if (t.stage) html += `<div class="task-tooltip-row"><span class="tt-label">Stage</span><span class="tt-value">${esc(t.stage)}</span></div>`;
+    }
+    html += `</div>`;
+
+    if (checkTotal > 0) {
+      html += `<div class="task-tooltip-divider"></div>`;
+      html += `<div class="task-tooltip-checklist"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg><span class="done">${checkDone}</span>/<span>${checkTotal}</span> complete</div>`;
+      html += `<div class="task-tooltip-checklist-items">`;
+      t.checklist.forEach(item => {
+        const checked = item.checked;
+        html += `<div class="tt-check-item ${checked ? 'tt-checked' : ''}">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5">${checked ? '<path d="M20 6L9 17l-5-5"/>' : '<rect x="3" y="3" width="18" height="18" rx="2"/>'}</svg>
+          <span>${esc(item.text)}</span>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+
+    if (assignees.length > 0) {
+      html += `<div class="task-tooltip-divider"></div>`;
+      html += `<div class="task-tooltip-assignees">`;
+      assignees.forEach(m => {
+        html += `<span class="task-tooltip-assignee"><span class="dot" style="background:${m.color};"></span>${esc(m.name)}</span>`;
+      });
+      html += `</div>`;
+    }
+
+    tooltipEl.innerHTML = html;
+    positionTooltip(e);
+    tooltipTimeout = setTimeout(() => tooltipEl.classList.add('visible'), 10);
+  }
+
+  function positionTooltip(e) {
+    if (!tooltipEl) return;
+    const pad = 12;
+    tooltipEl.style.left = '0px';
+    tooltipEl.style.top = '0px';
+    tooltipEl.style.display = 'block';
+    const rect = tooltipEl.getBoundingClientRect();
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    if (x + rect.width > window.innerWidth - pad) x = e.clientX - rect.width - pad;
+    if (y + rect.height > window.innerHeight - pad) y = e.clientY - rect.height - pad;
+    tooltipEl.style.left = x + 'px';
+    tooltipEl.style.top = y + 'px';
+  }
+
+  function moveTaskTooltip(e) {
+    if (tooltipEl && tooltipEl.classList.contains('visible')) positionTooltip(e);
+  }
+
+  function hideTaskTooltip() {
+    clearTimeout(tooltipTimeout);
+    if (tooltipEl) {
+      tooltipEl.classList.remove('visible');
+      tooltipEl.style.display = 'none';
+    }
+  }
 
   // ── Determine which phase a task belongs to ──
   function getTaskPhase(task) {
@@ -59,31 +153,111 @@ const ProjectView = (() => {
   // ── Compute phase date ranges for a set of tasks ──
   // Returns ordered array of { phase, start, end } with each phase extending to next phase's start
   function computePhaseRanges(tasks) {
-    const phaseMap = {};
+    const pipelines = Store.getPipelines();
+    const pipMap = new Map(); // pipId -> { pip, start, end }
+
     tasks.forEach(t => {
-      const phase = getTaskPhase(t);
-      if (!phaseMap[phase]) phaseMap[phase] = { start: null, end: null };
+      const pipId = t.pipelineId || '__none__';
+      if (!pipMap.has(pipId)) pipMap.set(pipId, { start: null, end: null });
+      const entry = pipMap.get(pipId);
       if (t.startDate) {
         const s = new Date(t.startDate + 'T00:00:00');
-        if (!phaseMap[phase].start || s < phaseMap[phase].start) phaseMap[phase].start = s;
+        if (!entry.start || s < entry.start) entry.start = s;
       }
       const ed = t.dueDate || t.startDate;
       if (ed) {
         const e = new Date(ed + 'T00:00:00');
-        if (!phaseMap[phase].end || e > phaseMap[phase].end) phaseMap[phase].end = e;
+        if (!entry.end || e > entry.end) entry.end = e;
       }
     });
-    // Build ordered ranges (only phases that exist)
-    const ranges = PHASE_ORDER
-      .filter(p => phaseMap[p] && phaseMap[p].start)
-      .map(p => ({ phase: p, start: phaseMap[p].start, end: phaseMap[p].end, color: PHASE_COLORS[p] }));
-    // Extend each phase's end to meet the next phase's start (fill gaps)
+
+    // Build ordered ranges: known-phase pipelines first, then custom, then no-pipeline
+    const ranges = [];
+    const addedPipIds = new Set();
+
+    // Known phases first (in PHASE_ORDER)
+    PHASE_ORDER.forEach(phase => {
+      pipelines.forEach(pip => {
+        if (addedPipIds.has(pip.id)) return;
+        const derived = getPipelinePhase(pip);
+        if (derived !== phase) return;
+        const entry = pipMap.get(pip.id);
+        if (!entry || !entry.start) return;
+        addedPipIds.add(pip.id);
+        ranges.push({ phase: pip.name, start: entry.start, end: entry.end, color: PHASE_COLORS[derived] || pip.color || '#94a3b8' });
+      });
+    });
+
+    // Custom pipelines (not matching any known phase)
+    pipelines.forEach(pip => {
+      if (addedPipIds.has(pip.id)) return;
+      const entry = pipMap.get(pip.id);
+      if (!entry || !entry.start) return;
+      addedPipIds.add(pip.id);
+      ranges.push({ phase: pip.name, start: entry.start, end: entry.end, color: '#94a3b8' });
+    });
+
+    // No-pipeline tasks
+    const noneEntry = pipMap.get('__none__');
+    if (noneEntry && noneEntry.start) {
+      ranges.push({ phase: 'Other', start: noneEntry.start, end: noneEntry.end, color: PHASE_COLORS['Other'] });
+    }
+
+    // Sort by start date
+    ranges.sort((a, b) => a.start - b.start);
+
+    // Extend each range's end to meet the next range's start (fill gaps)
     for (let i = 0; i < ranges.length - 1; i++) {
       if (ranges[i].end < ranges[i + 1].start) {
         ranges[i].end = ranges[i + 1].start;
       }
     }
     return ranges;
+  }
+
+  function buildExportLegend() {
+    const pipelines = Store.getPipelines();
+    const items = [];
+    const added = new Set();
+    PHASE_ORDER.forEach(phase => {
+      pipelines.forEach(pip => {
+        if (added.has(pip.id)) return;
+        if (getPipelinePhase(pip) === phase) {
+          added.add(pip.id);
+          items.push(`<span><span class="dot" style="background:${PHASE_COLORS[phase]}"></span>${esc(pip.name)}</span>`);
+        }
+      });
+    });
+    pipelines.forEach(pip => {
+      if (added.has(pip.id)) return;
+      items.push(`<span><span class="dot" style="background:#94a3b8"></span>${esc(pip.name)}</span>`);
+    });
+    items.push(`<span><span class="dot" style="background:${PHASE_COLORS['Other']}"></span>Other</span>`);
+    return items.join('');
+  }
+
+  function buildLegendItems() {
+    const pipelines = Store.getPipelines();
+    const items = [];
+    const added = new Set();
+    // Known-phase pipelines
+    PHASE_ORDER.forEach(phase => {
+      pipelines.forEach(pip => {
+        if (added.has(pip.id)) return;
+        if (getPipelinePhase(pip) === phase) {
+          added.add(pip.id);
+          items.push(`<span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS[phase]}"></span>${esc(pip.name)}</span>`);
+        }
+      });
+    });
+    // Custom pipelines
+    pipelines.forEach(pip => {
+      if (added.has(pip.id)) return;
+      items.push(`<span class="legend-item"><span class="legend-dot" style="background:#94a3b8"></span>${esc(pip.name)}</span>`);
+    });
+    // Other
+    items.push(`<span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS['Other']}"></span>Other</span>`);
+    return items.join('');
   }
 
   // ── Count unique assignees across tasks ──
@@ -183,19 +357,121 @@ const ProjectView = (() => {
   }
 
   function addPhaseRows(rows, projId, tasks) {
-    PHASE_ORDER.forEach(phase => {
-      const phaseTasks = tasks.filter(t => getTaskPhase(t) === phase);
-      if (phaseTasks.length === 0) return;
-      const range = dateRange(phaseTasks);
-      const phaseId = projId + '_' + phase;
-      const phaseVa = collectValidationActions(phaseTasks);
-      const phaseAssignees = countAssignees(phaseTasks);
-      rows.push({ level: 3, type: 'phase', id: phaseId, projId: projId, phaseName: phase, name: phase, color: PHASE_COLORS[phase], count: phaseTasks.length, ...range, validationActions: phaseVa, assigneeCount: phaseAssignees });
+    // Group tasks by pipeline
+    const pipelines = Store.getPipelines();
+    const pipelineMap = new Map(); // pipelineId -> tasks
+    const noPipelineTasks = [];
 
-      if (!collapsed.has('phase_' + phaseId)) {
-        phaseTasks.forEach(t => rows.push({ level: 4, type: 'task', task: t }));
+    tasks.forEach(t => {
+      if (t.pipelineId) {
+        if (!pipelineMap.has(t.pipelineId)) pipelineMap.set(t.pipelineId, []);
+        pipelineMap.get(t.pipelineId).push(t);
+      } else {
+        noPipelineTasks.push(t);
       }
     });
+
+    // Render pipelines in a stable order: known phase pipelines first, then others
+    const renderedPipIds = new Set();
+
+    // First pass: pipelines that match PHASE_ORDER (existing coloured ones)
+    PHASE_ORDER.forEach(phase => {
+      pipelines.forEach(pip => {
+        if (renderedPipIds.has(pip.id)) return;
+        const derivedPhase = getPipelinePhase(pip);
+        if (derivedPhase !== phase) return;
+        const pipTasks = pipelineMap.get(pip.id) || [];
+        if (pipTasks.length === 0) return;
+        renderedPipIds.add(pip.id);
+        addPipelineRows(rows, projId, pip, pipTasks, PHASE_COLORS[derivedPhase] || pip.color || '#94a3b8');
+      });
+    });
+
+    // Second pass: pipelines not matching any known phase (new/custom ones)
+    pipelines.forEach(pip => {
+      if (renderedPipIds.has(pip.id)) return;
+      const pipTasks = pipelineMap.get(pip.id) || [];
+      if (pipTasks.length === 0) return;
+      renderedPipIds.add(pip.id);
+      addPipelineRows(rows, projId, pip, pipTasks, '#94a3b8');
+    });
+
+    // Tasks with no pipeline
+    if (noPipelineTasks.length > 0) {
+      const phaseId = projId + '_Other';
+      const range = dateRange(noPipelineTasks);
+      const va = collectValidationActions(noPipelineTasks);
+      const ac = countAssignees(noPipelineTasks);
+      rows.push({ level: 3, type: 'phase', id: phaseId, projId, phaseName: 'Other', name: 'Other', color: PHASE_COLORS['Other'], count: noPipelineTasks.length, ...range, validationActions: va, assigneeCount: ac });
+      if (!collapsed.has('phase_' + phaseId)) {
+        noPipelineTasks.forEach(t => rows.push({ level: 5, type: 'task', task: t }));
+      }
+    }
+  }
+
+  // Determine which known phase a pipeline maps to (for colour)
+  function getPipelinePhase(pip) {
+    const pn = pip.name.toLowerCase();
+    if (pn.includes('development')) return 'Development';
+    if (pn.includes('validation') || pn.includes('regulatory')) return 'Validation & Regulatory Approval';
+    if (pn.includes('implementation')) return 'Implementation';
+    return null;
+  }
+
+  function addPipelineRows(rows, projId, pip, pipTasks, color) {
+    const phaseId = projId + '_pip_' + pip.id;
+    const range = dateRange(pipTasks);
+    const va = collectValidationActions(pipTasks);
+    const ac = countAssignees(pipTasks);
+    rows.push({ level: 3, type: 'phase', id: phaseId, projId, phaseName: pip.name, name: pip.name, color, count: pipTasks.length, ...range, validationActions: va, assigneeCount: ac });
+
+    if (collapsed.has('phase_' + phaseId)) return;
+
+    // Group tasks by stage within this pipeline
+    const stages = pip.stages || [];
+    const stageMap = new Map();
+    const unstagedTasks = [];
+
+    pipTasks.forEach(t => {
+      if (t.stage && stages.includes(t.stage)) {
+        if (!stageMap.has(t.stage)) stageMap.set(t.stage, []);
+        stageMap.get(t.stage).push(t);
+      } else {
+        unstagedTasks.push(t);
+      }
+    });
+
+    // If there are stages with tasks, show stage sub-groups
+    const hasStageGrouping = stages.some(s => (stageMap.get(s) || []).length > 0);
+
+    if (hasStageGrouping) {
+      stages.forEach(stage => {
+        const stageTasks = stageMap.get(stage) || [];
+        if (stageTasks.length === 0) return;
+        const stageId = phaseId + '_' + stage;
+        const sRange = dateRange(stageTasks);
+        const sVa = collectValidationActions(stageTasks);
+        const sAc = countAssignees(stageTasks);
+        rows.push({ level: 4, type: 'stage', id: stageId, projId, pipelineId: pip.id, stageName: stage, name: stage, color, count: stageTasks.length, ...sRange, validationActions: sVa, assigneeCount: sAc });
+        if (!collapsed.has('phase_' + stageId)) {
+          stageTasks.forEach(t => rows.push({ level: 5, type: 'task', task: t }));
+        }
+      });
+      // Unstaged tasks at the end — give them a collapsible "Unstaged" group
+      if (unstagedTasks.length > 0) {
+        const usId = phaseId + '_Unstaged';
+        const usRange = dateRange(unstagedTasks);
+        const usVa = collectValidationActions(unstagedTasks);
+        const usAc = countAssignees(unstagedTasks);
+        rows.push({ level: 4, type: 'stage', id: usId, projId, pipelineId: pip.id, stageName: '(Unstaged)', name: '(Unstaged)', color, count: unstagedTasks.length, ...usRange, validationActions: usVa, assigneeCount: usAc });
+        if (!collapsed.has('phase_' + usId)) {
+          unstagedTasks.forEach(t => rows.push({ level: 5, type: 'task', task: t }));
+        }
+      }
+    } else {
+      // No stage grouping — just show tasks directly
+      pipTasks.forEach(t => rows.push({ level: 5, type: 'task', task: t }));
+    }
   }
 
   function countPhases(tasks) {
@@ -281,7 +557,7 @@ const ProjectView = (() => {
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:3px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>Export
         </button>
         <div class="project-legend">
-          ${PHASE_ORDER.map(p => `<span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS[p]}"></span>${p}</span>`).join('')}
+          ${buildLegendItems()}
         </div>
         <span class="text-sm text-muted ml-auto">${tasks.length} tasks</span>
       </div>
@@ -332,8 +608,8 @@ const ProjectView = (() => {
   }
 
   // ── Row heights by level ──
-  const ROW_H = { 1: 40, 2: 36, 3: 32, 4: 36 };
-  const INDENT = { 1: 8, 2: 24, 3: 44, 4: 64 };
+  const ROW_H = { 1: 40, 2: 36, 3: 32, 4: 28, 5: 36 };
+  const INDENT = { 1: 8, 2: 24, 3: 44, 4: 60, 5: 76 };
 
   // ── Left panel rows ──
   function renderListRow(row) {
@@ -345,7 +621,8 @@ const ProjectView = (() => {
       const assigneeHtml = assignees.length > 0
         ? `<span class="pv-assignees">${assignees.map(m => `<span class="pv-avatar" style="background:${m.color};" title="${esc(m.name)}">${esc(m.name.charAt(0))}</span>`).join('')}</span>`
         : '';
-      return `<div class="pv-row pv-level-4" style="height:${ROW_H[4]}px;padding-left:${INDENT[4]}px;" onclick="TaskPanel.open('${t.id}')">
+      const taskLevel = row.level || 5;
+      return `<div class="pv-row pv-level-${taskLevel}" style="height:${ROW_H[taskLevel]}px;padding-left:${INDENT[taskLevel]}px;" onmouseenter="ProjectView.showTaskTooltip(event,'${t.id}')" onmousemove="ProjectView.moveTaskTooltip(event)" onmouseleave="ProjectView.hideTaskTooltip()" onclick="TaskPanel.open('${t.id}')">
         <span class="priority-dot" style="background:${pc};"></span>
         <span class="task-name">${esc(t.title)}</span>
         ${assigneeHtml}
@@ -357,7 +634,7 @@ const ProjectView = (() => {
     const colKey = row.type === 'project-group' ? 'pg_' + row.id : row.type === 'project' ? 'proj_' + row.id : 'phase_' + row.id;
     const isCollapsed = collapsed.has(colKey);
     const levelClass = 'pv-level-' + row.level;
-    const icon = exporting ? '' : (row.level <= 3 ? `<svg class="pv-chevron ${isCollapsed ? 'collapsed' : ''}" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>` : '');
+    const icon = exporting ? '' : (row.level <= 4 ? `<svg class="pv-chevron ${isCollapsed ? 'collapsed' : ''}" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>` : '');
 
     let badge = '';
     let staffBadge = '';
@@ -369,7 +646,7 @@ const ProjectView = (() => {
     }
     if (exporting) {
       badge = '';
-    } else if (row.type === 'phase') {
+    } else if (row.type === 'phase' || row.type === 'stage') {
       badge = `<span class="project-phase-badge" style="background:${row.color}20;color:${row.color};border:1px solid ${row.color}40;">${row.count}</span>`;
     } else {
       badge = `<span class="column-count">${row.count}</span>`;
@@ -385,6 +662,10 @@ const ProjectView = (() => {
         </button>`;
       } else if (row.type === 'phase') {
         addBtn = `<button class="btn-icon pv-add-btn" onclick="event.stopPropagation();ProjectView.quickAddToPhase('${row.projId}','${row.phaseName}')" title="Add task to ${esc(row.name)}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>`;
+      } else if (row.type === 'stage') {
+        addBtn = `<button class="btn-icon pv-add-btn" onclick="event.stopPropagation();ProjectView.quickAddToStage('${row.projId}','${row.pipelineId}','${row.stageName}')" title="Add task to ${esc(row.name)}">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
         </button>`;
       }
@@ -404,7 +685,7 @@ const ProjectView = (() => {
 
   // ── Timeline rows ──
   function renderTimelineRow(row, startDate) {
-    const h = ROW_H[row.level || 4];
+    const h = ROW_H[row.level || 5];
 
     if (row.type === 'task') {
       const t = row.task;
@@ -419,7 +700,7 @@ const ProjectView = (() => {
       const vaHtml = vaPillHtml(taskVa, (sd + dur) * cellWidth - 4);
       return `<div class="gantt-grid-row" style="height:${h}px;">
         <div class="gantt-bar" style="left:${sd * cellWidth}px;width:${dur * cellWidth}px;background:${color};height:20px;top:${(h-20)/2}px;"
-             data-task-id="${t.id}" onclick="ProjectView.barClick(event,'${t.id}')" onmousedown="ProjectView.startDrag(event,'${t.id}')">
+             data-task-id="${t.id}" onmouseenter="ProjectView.showTaskTooltip(event,'${t.id}')" onmousemove="ProjectView.moveTaskTooltip(event)" onmouseleave="ProjectView.hideTaskTooltip()" onclick="ProjectView.barClick(event,'${t.id}')" onmousedown="ProjectView.startDrag(event,'${t.id}')">
           <div class="bar-progress" style="width:${t.progress}%;"></div>
           ${showLabel ? `<span class="bar-label">${esc(t.title)}</span>` : ''}
           <div class="resize-handle left" onmousedown="ProjectView.startResize(event,'${t.id}','left')"></div>
@@ -437,13 +718,23 @@ const ProjectView = (() => {
     const rowVa = row.validationActions || [];
     const vaPill = vaPillHtml(rowVa, rowEndPx - 4);
 
-    // Phase row (level 3) — single continuous bar
+    // Phase/pipeline row (level 3) — single continuous bar
     if (row.type === 'phase') {
       const barH = 14;
       const sl = dayDiff(startDate, row.start) * cellWidth;
       const sw = Math.max(1, dayDiff(row.start, row.end) + 1) * cellWidth;
       return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">
         <div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};border-radius:4px;opacity:0.75;"></div>
+        ${vaPill}</div>`;
+    }
+
+    // Stage row (level 4) — smaller summary bar
+    if (row.type === 'stage') {
+      const barH = 10;
+      const sl = dayDiff(startDate, row.start) * cellWidth;
+      const sw = Math.max(1, dayDiff(row.start, row.end) + 1) * cellWidth;
+      return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">
+        <div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};border-radius:3px;opacity:0.55;"></div>
         ${vaPill}</div>`;
     }
 
@@ -832,7 +1123,9 @@ ${inlinedCSS}
   .project-summary-bar { position:absolute; display:flex; overflow:hidden; }
   .bar-progress { position:absolute; }
   .gantt-weekend-col { position:absolute; }
-  .gantt-today-line { position:absolute; }
+  .gantt-today-line { position:absolute; top:0; bottom:0; width:2px; background:#ef4444; z-index:5; pointer-events:none; }
+  .gantt-today-line::before { content:''; position:absolute; top:0; left:-4px; width:10px; height:10px; background:#ef4444; border-radius:50%; }
+  .gantt-today-line::after { content:'Today'; position:absolute; top:12px; left:6px; font-size:9px; font-weight:700; color:#ef4444; white-space:nowrap; }
   .va-pill { position:absolute; }
 
   @media print {
@@ -845,7 +1138,7 @@ ${inlinedCSS}
     <h1>${esc(title)} — Project Overview</h1>
     <span class="date">Exported ${new Date().toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' })}</span>
     <div class="export-legend">
-      ${PHASE_ORDER.map(p => `<span><span class="dot" style="background:${PHASE_COLORS[p]}"></span>${p}</span>`).join('')}
+      ${buildExportLegend()}
     </div>
   </div>
   <div class="ex-wrap">
@@ -984,6 +1277,35 @@ ${inlinedCSS}
     App.toast('Task added to ' + group.name + ' — ' + phaseName, 'success');
   }
 
+  async function quickAddToStage(projId, pipelineId, stageName) {
+    const group = Store.getGroup(projId);
+    const pipeline = Store.getPipeline(pipelineId);
+    if (!group || !pipeline) return;
+
+    const result = await Modal.show({
+      title: `Add Task — ${pipeline.name} › ${stageName}`,
+      fields: [
+        { type: 'text', key: 'title', label: 'Title', placeholder: 'Enter task title...', autofocus: true },
+        { type: 'select', key: 'priority', label: 'Priority', value: 'medium', options: [
+          { value: 'urgent', label: 'Urgent' }, { value: 'high', label: 'High' },
+          { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }
+        ]},
+        { type: 'text', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10), placeholder: 'YYYY-MM-DD' },
+        { type: 'text', key: 'dueDate', label: 'Due Date', placeholder: 'YYYY-MM-DD' }
+      ],
+      confirmText: 'Add Task'
+    });
+    if (!result || !result.title) return;
+
+    result.pipelineId = pipelineId;
+    result.stage = stageName;
+
+    const task = Store.addTask(result);
+    group.taskIds.push(task.id);
+    Store.updateGroup(group.id, { taskIds: group.taskIds });
+    App.toast(`Task added to ${group.name} — ${pipeline.name} › ${stageName}`, 'success');
+  }
+
   async function quickAddToProject(groupId) {
     const group = Store.getGroup(groupId);
     if (!group) return;
@@ -996,7 +1318,7 @@ ${inlinedCSS}
       ]},
     ];
     if (pipelines.length > 0) {
-      fields.push({ type: 'select', key: 'pipelineId', label: 'Pipeline', value: pipelines[0]?.id || '', options: [
+      fields.push({ type: 'select', key: 'pipelineId', label: 'Phase', value: pipelines[0]?.id || '', options: [
         { value: '', label: 'None' },
         ...pipelines.map(p => ({ value: p.id, label: p.name }))
       ]});
@@ -1035,6 +1357,12 @@ ${inlinedCSS}
     return d.toISOString().slice(0, 10);
   }
 
+  // Snap a pixel value to the nearest day boundary
+  function snapToDay(px) {
+    const days = Math.round(px / cellWidth);
+    return days * cellWidth;
+  }
+
   function barClick(e, taskId) {
     // Don't open panel if we just finished a drag
     if (e.target.classList.contains('resize-handle')) return;
@@ -1045,6 +1373,7 @@ ${inlinedCSS}
   function startDrag(e, taskId) {
     if (e.target.classList.contains('resize-handle')) return;
     if (e.button !== 0) return;
+    hideTaskTooltip();
     const bar = e.currentTarget;
     const task = Store.getTask(taskId);
     if (!task) return;
@@ -1058,7 +1387,8 @@ ${inlinedCSS}
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       if (Math.abs(dx) > 3) dragState.moved = true;
-      bar.style.left = (origLeft + dx) + 'px';
+      const snappedLeft = snapToDay(origLeft + dx);
+      bar.style.left = snappedLeft + 'px';
     };
 
     const onUp = () => {
@@ -1085,6 +1415,7 @@ ${inlinedCSS}
   function startResize(e, taskId, side) {
     if (e.button !== 0) return;
     e.stopPropagation();
+    hideTaskTooltip();
     const bar = e.target.closest('.gantt-bar');
     const task = Store.getTask(taskId);
     if (!bar || !task) return;
@@ -1099,12 +1430,17 @@ ${inlinedCSS}
       const dx = ev.clientX - startX;
       if (Math.abs(dx) > 3) dragState.moved = true;
       if (side === 'right') {
-        bar.style.width = Math.max(cellWidth, origWidth + dx) + 'px';
+        // Snap right edge to week boundary
+        const rawRight = origLeft + origWidth + dx;
+        const snappedRight = snapToDay(rawRight);
+        const newWidth = snappedRight - origLeft;
+        bar.style.width = Math.max(cellWidth, newWidth) + 'px';
       } else {
-        const newLeft = origLeft + dx;
-        const newWidth = origWidth - dx;
+        // Snap left edge to week boundary
+        const snappedLeft = snapToDay(origLeft + dx);
+        const newWidth = origLeft + origWidth - snappedLeft;
         if (newWidth >= cellWidth) {
-          bar.style.left = newLeft + 'px';
+          bar.style.left = snappedLeft + 'px';
           bar.style.width = newWidth + 'px';
         }
       }
@@ -1132,5 +1468,5 @@ ${inlinedCSS}
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, onSliderZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, barClick, startDrag, startResize };
+  return { init, render, onSliderZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip };
 })();

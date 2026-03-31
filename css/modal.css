@@ -333,11 +333,17 @@
 }
 
 .pv-level-4 {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.pv-level-5 {
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.pv-level-4 .task-name {
+.pv-level-5 .task-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -2,11 +2,56 @@
 
 const Store = (() => {
   const STORAGE_KEY = 'planner_project_data';
+  const IDB_NAME = 'planner_handles';
+  const IDB_STORE = 'handles';
   let data = null;
   let fileHandle = null; // File System Access API handle for save-back
   let autoSaveInterval = null;
   const AUTO_SAVE_MS = 30000; // auto-save to file every 30 seconds
   const listeners = new Map();
+
+  // ── IndexedDB helpers for persisting file handle across reloads ──
+  function openIDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function saveHandleToIDB(handle) {
+    try {
+      const db = await openIDB();
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(handle, 'fileHandle');
+    } catch (e) { console.warn('IDB save handle failed:', e); }
+  }
+
+  async function loadHandleFromIDB() {
+    try {
+      const db = await openIDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const req = tx.objectStore(IDB_STORE).get('fileHandle');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch (e) { return null; }
+  }
+
+  async function clearHandleFromIDB() {
+    try {
+      const db = await openIDB();
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete('fileHandle');
+    } catch (e) { /* ignore */ }
+  }
+
+  // Check if File System Access API is available (requires secure context)
+  function hasFileSystemAccess() {
+    return typeof window.showOpenFilePicker === 'function';
+  }
 
   function createId() {
     return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
@@ -74,6 +119,7 @@ const Store = (() => {
   // Load using File System Access API (preserves handle for save-back)
   async function loadFromHandle(handle) {
     fileHandle = handle;
+    await saveHandleToIDB(handle);
     const file = await handle.getFile();
     const text = await file.text();
     const json = JSON.parse(text);
@@ -82,14 +128,41 @@ const Store = (() => {
     return json;
   }
 
+  // Restore file handle from IDB after page reload
+  async function restoreFileHandle() {
+    const handle = await loadHandleFromIDB();
+    if (!handle) return false;
+    try {
+      const perm = await handle.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') {
+        fileHandle = handle;
+        startAutoSaveToFile();
+        return true;
+      }
+      // Permission not granted yet — store handle, will request on next save
+      fileHandle = handle;
+      return true;
+    } catch (e) {
+      console.warn('Restore handle failed:', e);
+      return false;
+    }
+  }
+
   // Save back to the original file handle
   async function saveToFile() {
     if (!data) return false;
-    if (!fileHandle) {
-      // No handle — try to get one via Save As
-      return await saveToFileAs();
-    }
+    if (!fileHandle) return false;
+    if (!hasFileSystemAccess()) return false;
     try {
+      // Verify we still have write permission
+      const perm = await fileHandle.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') {
+        const req = await fileHandle.requestPermission({ mode: 'readwrite' });
+        if (req !== 'granted') {
+          console.warn('Write permission denied');
+          return false;
+        }
+      }
       const writable = await fileHandle.createWritable();
       await writable.write(JSON.stringify(data, null, 2));
       await writable.close();
@@ -102,13 +175,14 @@ const Store = (() => {
 
   // Save As — pick a new file location
   async function saveToFileAs() {
-    if (!data) return false;
+    if (!data || !hasFileSystemAccess()) return false;
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName: (data.meta.title || 'project').replace(/\s+/g, '-').toLowerCase() + '.json',
         types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
       });
       fileHandle = handle;
+      await saveHandleToIDB(handle);
       await saveToFile();
       startAutoSaveToFile();
       return true;
@@ -133,7 +207,7 @@ const Store = (() => {
   }
 
   function getFileHandle() { return fileHandle; }
-  function clearFileHandle() { fileHandle = null; stopAutoSaveToFile(); }
+  function clearFileHandle() { fileHandle = null; stopAutoSaveToFile(); clearHandleFromIDB(); }
 
   function exportJSON() {
     if (!data) return;
@@ -148,7 +222,7 @@ const Store = (() => {
 
   function exportCSV() {
     if (!data) return;
-    const headers = ['ID', 'Title', 'Description', 'Bucket', 'Pipeline', 'Stage', 'Priority', 'Start Date', 'Due Date', 'Progress', 'Assignees', 'Labels'];
+    const headers = ['ID', 'Title', 'Description', 'Bucket', 'Phase', 'Stage', 'Priority', 'Start Date', 'Due Date', 'Progress', 'Assignees', 'Labels'];
     const rows = data.tasks.map(t => [
       t.id,
       `"${(t.title || '').replace(/"/g, '""')}"`,
@@ -463,8 +537,8 @@ const Store = (() => {
   }
 
   return {
-    on, emit, load, loadFromStorage, loadFromFile, loadFromHandle,
-    saveToFile, saveToFileAs, getFileHandle, clearFileHandle, startAutoSaveToFile, stopAutoSaveToFile,
+    on, emit, load, loadFromStorage, loadFromFile, loadFromHandle, restoreFileHandle,
+    hasFileSystemAccess, saveToFile, saveToFileAs, getFileHandle, clearFileHandle, startAutoSaveToFile, stopAutoSaveToFile,
     exportJSON, exportCSV,
     getData, getTasks, getTask, getBuckets, getBucket, getBucketName,
     getPipelines, getPipeline, getPipelineName,
