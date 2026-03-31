@@ -10,6 +10,7 @@ const ProjectView = (() => {
   let timelineStartDate = null; // stored for drag calculations
   let projectFilter = new Set(); // empty = show all, or set of group ids to filter
   let hiddenProjectGroups = new Set(); // project group ids hidden via sidebar eye toggle
+  let hiddenProjects = new Set(); // project (group) ids hidden via sidebar eye toggle
   let currentTotalDays = 365; // stored for fit-to-view calculation
   let needsFitToView = true; // auto-fit on first render
   let lastFilterKey = ''; // track filter changes for auto-fit
@@ -342,6 +343,7 @@ const ProjectView = (() => {
     if (collapsed.has('pg_' + pgId)) return;
 
     pgGroups.forEach(g => {
+      if (hiddenProjects.has(g.id)) return;
       const gTasks = allTasks.filter(t => g.taskIds.includes(t.id) && t.startDate);
       const range = dateRange(gTasks);
       const phaseCounts = countPhases(gTasks);
@@ -980,6 +982,16 @@ const ProjectView = (() => {
     return !hiddenProjectGroups.has(pgId);
   }
 
+  function toggleProjectVisibility(projId) {
+    if (hiddenProjects.has(projId)) hiddenProjects.delete(projId);
+    else hiddenProjects.add(projId);
+    render(App.getFilters());
+  }
+
+  function isProjectVisible(projId) {
+    return !hiddenProjects.has(projId);
+  }
+
   function toggle(key) {
     if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
     render(App.getFilters());
@@ -1468,5 +1480,5 @@ ${inlinedCSS}
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, onSliderZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip };
+  return { init, render, onSliderZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggleProjectVisibility, isProjectVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip };
 })();

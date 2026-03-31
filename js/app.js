@@ -271,12 +271,17 @@ const App = (() => {
     if (groupsEl) {
       groupsEl.innerHTML = Store.getGroups().map(g => {
         const pg = g.projectGroupId ? Store.getProjectGroup(g.projectGroupId) : null;
+        const visible = ProjectView.isProjectVisible(g.id);
         return `<div class="nav-item" style="cursor:pointer;">
           <span style="width:10px;height:10px;border-radius:3px;background:${g.color};flex-shrink:0;"></span>
-          ${esc(g.name)}
-          ${pg ? `<span class="text-sm text-muted" style="margin-left:auto;font-size:10px;">${esc(pg.name)}</span>` : ''}
-          <span class="badge" style="${pg ? '' : 'margin-left:auto;'}">${g.taskIds.length}</span>
-          <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeGroup('${g.id}')" title="Remove project">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(g.name)}</span>
+          <button class="btn-icon sidebar-eye" onclick="event.stopPropagation();App.toggleProjectVisibility('${g.id}')" title="${visible ? 'Hide in project view' : 'Show in project view'}" style="flex-shrink:0;opacity:${visible ? '0.7' : '0.3'};">
+            ${visible
+              ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+              : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+            }
+          </button>
+          <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeGroup('${g.id}')" title="Remove project" style="flex-shrink:0;">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>`;
@@ -635,6 +640,11 @@ const App = (() => {
     renderSidebarLists();
   }
 
+  function toggleProjectVisibility(projId) {
+    ProjectView.toggleProjectVisibility(projId);
+    renderSidebarLists();
+  }
+
   async function removePipeline(id) {
     const pipeline = Store.getPipeline(id);
     if (!pipeline) return;
@@ -728,7 +738,7 @@ const App = (() => {
     onSearch, setFilter, clearFilters, toggleFilterMenu,
     quickAddTask, editProjectTitle,
     addMember, addLabel, addProjectGroup, addGroup, addPipeline,
-    editPipeline, removePipeline, toggleProjectGroupVisibility,
+    editPipeline, removePipeline, toggleProjectGroupVisibility, toggleProjectVisibility,
     removeMember, removeLabel, removeProjectGroup, removeGroup,
     toggleTheme, openFile, importFile, loadSample, newProject,
     handleDrop, handleFileSelect, closeProject, toast

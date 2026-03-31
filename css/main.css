@@ -511,6 +511,8 @@ a { color: var(--accent); text-decoration: none; }
   top: 100%;
   right: 0;
   min-width: 180px;
+  max-height: 70vh;
+  overflow-y: auto;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
