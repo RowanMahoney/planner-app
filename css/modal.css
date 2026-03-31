@@ -481,6 +481,20 @@
   cursor: pointer;
 }
 
+.pv-zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 3px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  line-height: 0;
+}
+.pv-zoom-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+
 /* Staff allocation badge */
 .pv-staff-badge {
   display: inline-flex;

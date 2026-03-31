@@ -220,7 +220,7 @@ const ProjectView = (() => {
     const pipelines = Store.getPipelines();
     const items = [];
     const added = new Set();
-    PHASE_ORDER.forEach(phase => {
+    PHASE_ORDER.filter(p => p !== 'Other').forEach(phase => {
       pipelines.forEach(pip => {
         if (added.has(pip.id)) return;
         if (getPipelinePhase(pip) === phase) {
@@ -229,11 +229,6 @@ const ProjectView = (() => {
         }
       });
     });
-    pipelines.forEach(pip => {
-      if (added.has(pip.id)) return;
-      items.push(`<span><span class="dot" style="background:#94a3b8"></span>${esc(pip.name)}</span>`);
-    });
-    items.push(`<span><span class="dot" style="background:${PHASE_COLORS['Other']}"></span>Other</span>`);
     return items.join('');
   }
 
@@ -241,8 +236,7 @@ const ProjectView = (() => {
     const pipelines = Store.getPipelines();
     const items = [];
     const added = new Set();
-    // Known-phase pipelines
-    PHASE_ORDER.forEach(phase => {
+    PHASE_ORDER.filter(p => p !== 'Other').forEach(phase => {
       pipelines.forEach(pip => {
         if (added.has(pip.id)) return;
         if (getPipelinePhase(pip) === phase) {
@@ -251,13 +245,6 @@ const ProjectView = (() => {
         }
       });
     });
-    // Custom pipelines
-    pipelines.forEach(pip => {
-      if (added.has(pip.id)) return;
-      items.push(`<span class="legend-item"><span class="legend-dot" style="background:#94a3b8"></span>${esc(pip.name)}</span>`);
-    });
-    // Other
-    items.push(`<span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS['Other']}"></span>Other</span>`);
     return items.join('');
   }
 
@@ -545,9 +532,13 @@ const ProjectView = (() => {
     const html = `<div class="project-view">
       <div class="project-controls">
         <div class="pv-zoom-slider">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M8 11h6"/></svg>
+          <button class="pv-zoom-btn" onclick="ProjectView.stepZoom(-8)" title="Zoom out">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M8 11h6"/></svg>
+          </button>
           <input type="range" min="0" max="100" value="${zoomToSlider(cellWidth)}" id="pv-zoom-range" oninput="ProjectView.onSliderZoom(this.value)" />
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M8 11h6M11 8v6"/></svg>
+          <button class="pv-zoom-btn" onclick="ProjectView.stepZoom(8)" title="Zoom in">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M8 11h6M11 8v6"/></svg>
+          </button>
         </div>
         <button class="gantt-today-btn" onclick="ProjectView.fitToView()" title="Fit timeline to screen">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:3px;"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>Fit
@@ -884,6 +875,15 @@ const ProjectView = (() => {
   function onSliderZoom(val) {
     cellWidth = sliderToCellWidth(parseFloat(val));
     // Partial re-render: only update timeline content (preserves slider drag)
+    updateTimeline();
+  }
+
+  function stepZoom(delta) {
+    const current = zoomToSlider(cellWidth);
+    const next = Math.max(0, Math.min(100, current + delta));
+    cellWidth = sliderToCellWidth(next);
+    const slider = document.getElementById('pv-zoom-range');
+    if (slider) slider.value = next;
     updateTimeline();
   }
 
@@ -1480,5 +1480,5 @@ ${inlinedCSS}
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, onSliderZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggleProjectVisibility, isProjectVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip };
+  return { init, render, onSliderZoom, stepZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggleProjectVisibility, isProjectVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip };
 })();
