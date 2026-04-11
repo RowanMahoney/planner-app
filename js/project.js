@@ -19,9 +19,9 @@ const ProjectView = (() => {
   const ZOOM_SLIDER_MAX = 50;   // most zoomed in
 
   const PHASE_COLORS = {
-    'Development': '#6366f1',
-    'Validation & Regulatory Approval': '#f59e0b',
-    'Implementation': '#22c55e',
+    'Development': '#4338ca',
+    'Validation & Regulatory Approval': '#6366f1',
+    'Implementation': '#a5b4fc',
     'Other': '#94a3b8'
   };
   const PHASE_ORDER = ['Development', 'Validation & Regulatory Approval', 'Implementation', 'Other'];
@@ -229,6 +229,8 @@ const ProjectView = (() => {
         }
       });
     });
+    // VA badge legend entry
+    items.push(`<span><span class="dot" style="background:#ef4444;border-radius:3px;"></span>Validation Action</span>`);
     return items.join('');
   }
 
@@ -572,6 +574,7 @@ const ProjectView = (() => {
           </div>
           <div class="gantt-timeline-body" id="project-timeline-body" style="width:${totalDays * cellWidth}px;position:relative;">
             ${renderWeekendColumns(minDate, totalDays)}
+            ${renderFYLines(minDate, totalDays)}
             ${renderTodayLine(minDate, today, totalDays)}
             ${rows.map(r => renderTimelineRow(r, minDate)).join('')}
           </div>
@@ -617,7 +620,7 @@ const ProjectView = (() => {
       const taskLevel = row.level || 5;
       return `<div class="pv-row pv-level-${taskLevel}" style="height:${ROW_H[taskLevel]}px;padding-left:${INDENT[taskLevel]}px;" onmouseenter="ProjectView.showTaskTooltip(event,'${t.id}')" onmousemove="ProjectView.moveTaskTooltip(event)" onmouseleave="ProjectView.hideTaskTooltip()" onclick="TaskPanel.open('${t.id}')">
         <span class="priority-dot" style="background:${pc};"></span>
-        <span class="task-name">${esc(t.title)}</span>
+        <span class="task-name" ondblclick="ProjectView.editTaskTitle(event, '${t.id}')">${esc(t.title)}</span>
         ${assigneeHtml}
       </div>`;
     }
@@ -731,17 +734,17 @@ const ProjectView = (() => {
         ${vaPill}</div>`;
     }
 
-    // Project Group (level 1) — single muted continuous bar
+    // Project Group (level 1) — single muted continuous bar (no VA pill)
     if (row.level === 1) {
       const barH = 22;
       const sl = dayDiff(startDate, row.start) * cellWidth;
       const sw = Math.max(1, dayDiff(row.start, row.end) + 1) * cellWidth;
       return `<div class="gantt-grid-row pv-grid-1" style="height:${h}px;${gridDivider}">
         <div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.45;border-radius:4px;"></div>
-        ${vaPill}</div>`;
+        </div>`;
     }
 
-    // Project (level 2) — phase-colored sections based on actual date ranges
+    // Project (level 2) — phase-colored sections based on actual date ranges (no VA pill)
     const barH = 18;
     const phaseRanges = row.phaseRanges || [];
     if (phaseRanges.length === 0) {
@@ -750,7 +753,7 @@ const ProjectView = (() => {
       const sw = Math.max(1, dayDiff(row.start, row.end) + 1) * cellWidth;
       return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">
         <div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${row.color};opacity:0.7;border-radius:4px;"></div>
-        ${vaPill}</div>`;
+        </div>`;
     }
     const barsHtml = phaseRanges.map((pr, i) => {
       const sl = dayDiff(startDate, pr.start) * cellWidth;
@@ -761,69 +764,85 @@ const ProjectView = (() => {
       return `<div class="project-summary-bar" style="left:${sl}px;width:${sw}px;height:${barH}px;top:${(h-barH)/2}px;background:${pr.color};border-radius:${br};opacity:0.85;" title="${pr.phase}"></div>`;
     }).join('');
 
-    return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">${barsHtml}${vaPill}</div>`;
+    return `<div class="gantt-grid-row pv-grid-${row.level}" style="height:${h}px;">${barsHtml}</div>`;
   }
 
   // ── Timeline header ──
   function renderTimelineHeader(startDate, totalDays) {
     let topHtml = '', bottomHtml = '';
 
+    // NAB Financial Year: Oct 1 – Sep 30
+    // FY runs from Oct of prior calendar year, e.g. FY26 = Oct 2025 – Sep 2026
+    // Q1=Oct-Dec, Q2=Jan-Mar, Q3=Apr-Jun, Q4=Jul-Sep
+    function getFY(d) { return d.getMonth() >= 9 ? d.getFullYear() + 1 : d.getFullYear(); }
+    function getFQ(d) {
+      const m = d.getMonth(); // 0-based
+      if (m >= 9) return 1;  // Oct-Dec = Q1
+      if (m >= 6) return 4;  // Jul-Sep = Q4
+      if (m >= 3) return 3;  // Apr-Jun = Q3
+      return 2;              // Jan-Mar = Q2
+    }
+
     // Choose header format based on cellWidth thresholds
     if (cellWidth < 3) {
-      // Very zoomed out: years / quarters
-      const years = new Map();
-      const quarters = new Map();
+      // Very zoomed out: FY years / FY quarters
+      const fyears = new Map();
+      const fquarters = new Map();
       for (let i = 0; i < totalDays; i++) {
         const d = new Date(startDate); d.setDate(d.getDate() + i);
-        const yr = d.getFullYear();
-        const q = Math.floor(d.getMonth() / 3) + 1;
-        const yk = '' + yr;
-        const qk = yr + '-Q' + q;
-        if (!years.has(yk)) years.set(yk, { name: '' + yr, count: 0 });
-        years.get(yk).count++;
-        if (!quarters.has(qk)) quarters.set(qk, { name: 'Q' + q, count: 0 });
-        quarters.get(qk).count++;
+        const fy = getFY(d);
+        const fq = getFQ(d);
+        const fyk = 'FY' + fy;
+        const fqk = fy + '-Q' + fq;
+        if (!fyears.has(fyk)) fyears.set(fyk, { name: fyk, count: 0 });
+        fyears.get(fyk).count++;
+        if (!fquarters.has(fqk)) fquarters.set(fqk, { name: 'Q' + fq, count: 0 });
+        fquarters.get(fqk).count++;
       }
-      years.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;font-weight:700;">${v.name}</div>`; });
-      quarters.forEach(v => {
+      fyears.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;font-weight:700;">${v.name}</div>`; });
+      fquarters.forEach(v => {
         const w = v.count * cellWidth;
         bottomHtml += `<div class="gantt-header-day" style="width:${w}px;min-width:${w}px;">${w > 30 ? v.name : ''}</div>`;
       });
     } else if (cellWidth < 8) {
-      // Medium-out: years / months
-      const years = new Map();
+      // Medium-out: FY quarters / months
+      const fquarters = new Map();
       const months = new Map();
       for (let i = 0; i < totalDays; i++) {
         const d = new Date(startDate); d.setDate(d.getDate() + i);
-        const yr = '' + d.getFullYear();
+        const fy = getFY(d);
+        const fq = getFQ(d);
+        const fqk = 'FY' + fy + '-Q' + fq;
         const mk = d.getFullYear() + '-' + d.getMonth();
-        if (!years.has(yr)) years.set(yr, { name: yr, count: 0 });
-        years.get(yr).count++;
-        if (!months.has(mk)) months.set(mk, { name: d.toLocaleDateString('en-US', { month: 'short' }), count: 0 });
+        if (!fquarters.has(fqk)) fquarters.set(fqk, { name: 'FY' + fy + ' Q' + fq, count: 0 });
+        fquarters.get(fqk).count++;
+        if (!months.has(mk)) months.set(mk, { name: d.toLocaleDateString('en-AU', { month: 'short' }), count: 0 });
         months.get(mk).count++;
       }
-      years.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;font-weight:700;">${v.name}</div>`; });
+      fquarters.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;font-weight:700;">${v.name}</div>`; });
       months.forEach(v => {
         const w = v.count * cellWidth;
         bottomHtml += `<div class="gantt-header-day" style="width:${w}px;min-width:${w}px;">${w > 25 ? v.name : ''}</div>`;
       });
     } else {
-      // Zoomed in: months / days
-      const months = new Map();
+      // Zoomed in: FY quarters / days
+      const fquarters = new Map();
       for (let i = 0; i < totalDays; i++) {
         const d = new Date(startDate); d.setDate(d.getDate() + i);
-        const mk = d.getFullYear() + '-' + d.getMonth();
-        if (!months.has(mk)) months.set(mk, { name: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), count: 0 });
-        months.get(mk).count++;
+        const fy = getFY(d);
+        const fq = getFQ(d);
+        const fqk = 'FY' + fy + '-Q' + fq;
+        if (!fquarters.has(fqk)) fquarters.set(fqk, { name: 'FY' + fy + ' Q' + fq, count: 0 });
+        fquarters.get(fqk).count++;
         const isToday = d.toDateString() === new Date().toDateString();
         const isWknd = d.getDay() === 0 || d.getDay() === 6;
         let label = '';
         if (cellWidth >= 25) label = d.getDate();
         else if (cellWidth >= 15) label = d.getDate() % 2 === 1 ? d.getDate() : '';
         else label = d.getDate() % 5 === 1 ? d.getDate() : '';
-        bottomHtml += `<div class="gantt-header-day ${isToday ? 'today' : ''} ${isWknd ? 'weekend' : ''}" style="width:${cellWidth}px;min-width:${cellWidth}px;" title="${d.toLocaleDateString()}">${label}</div>`;
+        bottomHtml += `<div class="gantt-header-day ${isToday ? 'today' : ''} ${isWknd ? 'weekend' : ''}" style="width:${cellWidth}px;min-width:${cellWidth}px;" title="${d.toLocaleDateString('en-AU')}">${label}</div>`;
       }
-      months.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;">${v.name}</div>`; });
+      fquarters.forEach(v => { topHtml += `<div class="gantt-header-month" style="width:${v.count * cellWidth}px;">${v.name}</div>`; });
     }
 
     return `<div class="gantt-header-months">${topHtml}</div><div class="gantt-header-days">${bottomHtml}</div>`;
@@ -842,6 +861,30 @@ const ProjectView = (() => {
     const dd = dayDiff(startDate, today);
     if (dd < 0 || dd > totalDays) return '';
     return `<div class="gantt-today-line" style="left:${dd * cellWidth + cellWidth/2}px;"></div>`;
+  }
+
+  // Render FY year (solid) and quarter (dashed) boundary lines
+  function renderFYLines(startDate, totalDays) {
+    let h = '';
+    const seen = new Set();
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(startDate); d.setDate(d.getDate() + i);
+      const m = d.getMonth();
+      const day = d.getDate();
+      if (day !== 1) continue; // only on 1st of month
+      const key = d.getFullYear() + '-' + m;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const px = i * cellWidth;
+      if (m === 9) {
+        // Oct 1 = FY boundary — solid line
+        h += `<div class="fy-line fy-year" style="left:${px}px;"></div>`;
+      } else if (m === 0 || m === 3 || m === 6) {
+        // Jan 1, Apr 1, Jul 1 = FQ boundary — dashed line
+        h += `<div class="fy-line fy-quarter" style="left:${px}px;"></div>`;
+      }
+    }
+    return h;
   }
 
   // ── Scroll sync ──
@@ -936,6 +979,7 @@ const ProjectView = (() => {
     if (bodyEl) {
       bodyEl.style.width = timelineWidth + 'px';
       bodyEl.innerHTML = renderWeekendColumns(minDate, totalDays)
+        + renderFYLines(minDate, totalDays)
         + renderTodayLine(minDate, today, totalDays)
         + rows.map(r => renderTimelineRow(r, minDate)).join('');
     }
@@ -1084,6 +1128,7 @@ const ProjectView = (() => {
     exporting = true;
     const listHtml = filteredRows.map(r => renderListRow(r)).join('');
     const gridHtml = renderWeekendColumns(minDate, totalDays)
+      + renderFYLines(minDate, totalDays)
       + renderTodayLine(minDate, today, totalDays)
       + filteredRows.map(r => renderTimelineRow(r, minDate)).join('');
     const headerHtml = renderTimelineHeader(minDate, totalDays);
@@ -1139,6 +1184,9 @@ ${inlinedCSS}
   .gantt-today-line::before { content:''; position:absolute; top:0; left:-4px; width:10px; height:10px; background:#ef4444; border-radius:50%; }
   .gantt-today-line::after { content:'Today'; position:absolute; top:12px; left:6px; font-size:9px; font-weight:700; color:#ef4444; white-space:nowrap; }
   .va-pill { position:absolute; }
+  .fy-line { position:absolute; top:0; bottom:0; width:1px; z-index:3; pointer-events:none; }
+  .fy-line.fy-year { background:rgba(148,163,184,0.45); }
+  .fy-line.fy-quarter { background:repeating-linear-gradient(to bottom, rgba(148,163,184,0.35) 0px, rgba(148,163,184,0.35) 4px, transparent 4px, transparent 8px); }
 
   @media print {
     body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
@@ -1270,17 +1318,16 @@ ${inlinedCSS}
           { value: 'urgent', label: 'Urgent' }, { value: 'high', label: 'High' },
           { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }
         ]},
-        { type: 'text', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10), placeholder: 'YYYY-MM-DD' },
-        { type: 'text', key: 'dueDate', label: 'Due Date', placeholder: 'YYYY-MM-DD' }
+        { type: 'date', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10) },
+        { type: 'date', key: 'dueDate', label: 'Due Date' }
       ],
       confirmText: 'Add Task'
     });
     if (!result || !result.title) return;
 
-    // Auto-assign pipeline and first stage
+    // Auto-assign pipeline but leave unstaged by default
     if (matchedPipeline) {
       result.pipelineId = matchedPipeline.id;
-      if (matchedPipeline.stages.length > 0) result.stage = matchedPipeline.stages[0];
     }
 
     const task = Store.addTask(result);
@@ -1302,8 +1349,8 @@ ${inlinedCSS}
           { value: 'urgent', label: 'Urgent' }, { value: 'high', label: 'High' },
           { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }
         ]},
-        { type: 'text', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10), placeholder: 'YYYY-MM-DD' },
-        { type: 'text', key: 'dueDate', label: 'Due Date', placeholder: 'YYYY-MM-DD' }
+        { type: 'date', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10) },
+        { type: 'date', key: 'dueDate', label: 'Due Date' }
       ],
       confirmText: 'Add Task'
     });
@@ -1336,8 +1383,8 @@ ${inlinedCSS}
       ]});
     }
     fields.push(
-      { type: 'text', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10), placeholder: 'YYYY-MM-DD' },
-      { type: 'text', key: 'dueDate', label: 'Due Date', placeholder: 'YYYY-MM-DD' }
+      { type: 'date', key: 'startDate', label: 'Start Date', value: new Date().toISOString().slice(0, 10) },
+      { type: 'date', key: 'dueDate', label: 'Due Date' }
     );
     const result = await Modal.show({
       title: `Add Task to ${group.name}`,
@@ -1346,11 +1393,7 @@ ${inlinedCSS}
     });
     if (!result || !result.title) return;
 
-    // Set stage to first stage of selected pipeline
-    if (result.pipelineId) {
-      const pl = Store.getPipeline(result.pipelineId);
-      if (pl && pl.stages.length > 0) result.stage = pl.stages[0];
-    }
+    // Leave unstaged by default — user can assign a stage later
 
     const task = Store.addTask(result);
     // Add to project group
@@ -1369,10 +1412,36 @@ ${inlinedCSS}
     return d.toISOString().slice(0, 10);
   }
 
-  // Snap a pixel value to the nearest day boundary
-  function snapToDay(px) {
+  // Snap pixel to the nearest 1st-of-month (for bar start/left edge)
+  function snapToMonthStart(px) {
+    const days = px / cellWidth;
+    const d = new Date(timelineStartDate);
+    d.setDate(d.getDate() + Math.round(days));
+    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+    const nextMonthStart = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const snappedDate = Math.abs(d - monthStart) <= Math.abs(d - nextMonthStart) ? monthStart : nextMonthStart;
+    return Math.round((snappedDate - timelineStartDate) / (1000 * 60 * 60 * 24)) * cellWidth;
+  }
+
+  // Snap pixel to the nearest last-day-of-month (for bar end/right edge)
+  function snapToMonthEnd(px) {
+    const days = px / cellWidth;
+    const d = new Date(timelineStartDate);
+    d.setDate(d.getDate() + Math.round(days));
+    // Last day of current month and last day of previous month
+    const endOfThisMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const endOfPrevMonth = new Date(d.getFullYear(), d.getMonth(), 0);
+    const snappedDate = Math.abs(d - endOfThisMonth) <= Math.abs(d - endOfPrevMonth) ? endOfThisMonth : endOfPrevMonth;
+    // Pixel position is the right edge of that day, so +1 day worth of px
+    const snapDays = Math.round((snappedDate - timelineStartDate) / (1000 * 60 * 60 * 24));
+    return (snapDays + 1) * cellWidth;
+  }
+
+  function pxToDateAt(px) {
     const days = Math.round(px / cellWidth);
-    return days * cellWidth;
+    const d = new Date(timelineStartDate);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
   }
 
   function barClick(e, taskId) {
@@ -1399,8 +1468,10 @@ ${inlinedCSS}
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       if (Math.abs(dx) > 3) dragState.moved = true;
-      const snappedLeft = snapToDay(origLeft + dx);
+      const snappedLeft = snapToMonthStart(origLeft + dx);
+      const snappedRight = snapToMonthEnd(origLeft + origWidth + dx);
       bar.style.left = snappedLeft + 'px';
+      bar.style.width = Math.max(cellWidth, snappedRight - snappedLeft) + 'px';
     };
 
     const onUp = () => {
@@ -1409,11 +1480,10 @@ ${inlinedCSS}
       if (!dragState.moved) { dragState = null; return; }
 
       const newLeft = parseInt(bar.style.left);
-      const newStart = pxToDate(newLeft);
-      const daysMoved = Math.round((newLeft - origLeft) / cellWidth);
-      const oldEnd = task.dueDate ? new Date(task.dueDate + 'T00:00:00') : new Date(task.startDate + 'T00:00:00');
-      oldEnd.setDate(oldEnd.getDate() + daysMoved);
-      const newEnd = oldEnd.toISOString().slice(0, 10);
+      const newWidth = parseInt(bar.style.width);
+      const newStart = pxToDateAt(newLeft);
+      // End is the last day within the bar (right edge px - 1 day)
+      const newEnd = pxToDateAt(newLeft + newWidth - cellWidth);
 
       Store.updateTask(taskId, { startDate: newStart, dueDate: newEnd });
       dragState = null;
@@ -1442,14 +1512,14 @@ ${inlinedCSS}
       const dx = ev.clientX - startX;
       if (Math.abs(dx) > 3) dragState.moved = true;
       if (side === 'right') {
-        // Snap right edge to week boundary
+        // Snap right edge to end-of-month
         const rawRight = origLeft + origWidth + dx;
-        const snappedRight = snapToDay(rawRight);
+        const snappedRight = snapToMonthEnd(rawRight);
         const newWidth = snappedRight - origLeft;
         bar.style.width = Math.max(cellWidth, newWidth) + 'px';
       } else {
-        // Snap left edge to week boundary
-        const snappedLeft = snapToDay(origLeft + dx);
+        // Snap left edge to 1st-of-month
+        const snappedLeft = snapToMonthStart(origLeft + dx);
         const newWidth = origLeft + origWidth - snappedLeft;
         if (newWidth >= cellWidth) {
           bar.style.left = snappedLeft + 'px';
@@ -1465,8 +1535,8 @@ ${inlinedCSS}
 
       const newLeft = parseInt(bar.style.left);
       const newWidth = parseInt(bar.style.width);
-      const newStart = pxToDate(newLeft);
-      const newEnd = pxToDate(newLeft + newWidth - cellWidth);
+      const newStart = pxToDateAt(newLeft);
+      const newEnd = pxToDateAt(newLeft + newWidth - cellWidth);
 
       Store.updateTask(taskId, { startDate: newStart, dueDate: newEnd });
       dragState = null;
@@ -1480,5 +1550,31 @@ ${inlinedCSS}
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  return { init, render, onSliderZoom, stepZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggleProjectVisibility, isProjectVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip };
+  function editTaskTitle(e, taskId) {
+    e.stopPropagation();
+    const el = e.currentTarget;
+    const task = Store.getTask(taskId);
+    if (!task) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = task.title;
+    input.style.cssText = 'width:100%;font-size:inherit;font-weight:inherit;border:1px solid var(--accent);border-radius:4px;padding:1px 4px;background:var(--surface);color:var(--text-primary);outline:none;';
+    el.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = () => {
+      const newTitle = input.value.trim();
+      if (newTitle && newTitle !== task.title) {
+        Store.updateTask(taskId, { title: newTitle });
+      }
+      render();
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = task.title; input.blur(); }
+    });
+  }
+
+  return { init, render, onSliderZoom, stepZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggleProjectVisibility, isProjectVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip, editTaskTitle };
 })();

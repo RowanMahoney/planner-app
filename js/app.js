@@ -30,6 +30,9 @@ const App = (() => {
     Store.on('projectGroupDeleted', refreshView);
     Store.on('memberDeleted', refreshView);
     Store.on('labelDeleted', refreshView);
+    Store.on('validationActionDefAdded', refreshView);
+    Store.on('validationActionDefUpdated', refreshView);
+    Store.on('validationActionDefDeleted', refreshView);
 
     // Load saved theme
     const savedTheme = localStorage.getItem('planner_theme') || 'dark';
@@ -149,7 +152,20 @@ const App = (() => {
         <!-- Main -->
         <main class="main-content">
           <header class="main-header">
-            <h1 class="header-title" id="view-title">Project</h1>
+            <div class="view-tabs">
+              <button class="view-tab active" data-view="project" onclick="App.switchView('project')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+                Project
+              </button>
+              <button class="view-tab" data-view="board" onclick="App.switchView('board')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                Board
+              </button>
+              <button class="view-tab" data-view="validation" onclick="App.switchView('validation')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+                Validation Actions
+              </button>
+            </div>
             <div class="header-actions">
               <div class="search-box">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -223,7 +239,7 @@ const App = (() => {
     const membersEl = document.getElementById('sidebar-members');
     if (membersEl) {
       membersEl.innerHTML = Store.getMembers().map(m => `
-        <div class="nav-item" style="cursor:pointer;" onclick="App.setFilter('assignee','${m.id}')">
+        <div class="nav-item">
           <span style="width:20px;height:20px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:white;">${initials(m.name)}</span>
           ${esc(m.name)}
           <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeMember('${m.id}')" title="Remove member">
@@ -236,7 +252,7 @@ const App = (() => {
     const labelsEl = document.getElementById('sidebar-labels');
     if (labelsEl) {
       labelsEl.innerHTML = Store.getLabels().map(l => `
-        <div class="nav-item" style="cursor:pointer;" onclick="App.setFilter('label','${l.id}')">
+        <div class="nav-item">
           <span style="width:10px;height:10px;border-radius:50%;background:${l.color};flex-shrink:0;"></span>
           ${esc(l.name)}
           <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeLabel('${l.id}')" title="Remove label">
@@ -292,7 +308,7 @@ const App = (() => {
     const pipEl = document.getElementById('sidebar-pipelines');
     if (pipEl) {
       pipEl.innerHTML = Store.getPipelines().map(p => `
-        <div class="nav-item" style="cursor:pointer;" onclick="App.editPipeline('${p.id}')">
+        <div class="nav-item">
           <span style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0;"></span>
           ${esc(p.name)}
           <span class="badge" style="margin-left:auto;">${p.stages.length}</span>
@@ -305,14 +321,10 @@ const App = (() => {
 
   function switchView(view) {
     currentView = view;
-    // Update nav
-    document.querySelectorAll('.nav-item[data-view]').forEach(el => {
+    // Update tabs
+    document.querySelectorAll('.view-tab[data-view]').forEach(el => {
       el.classList.toggle('active', el.dataset.view === view);
     });
-    // Update title
-    const titles = { board: 'Board', project: 'Project Overview' };
-    const titleEl = document.getElementById('view-title');
-    if (titleEl) titleEl.textContent = titles[view] || view;
     refreshView();
   }
 
@@ -320,6 +332,7 @@ const App = (() => {
     switch (currentView) {
       case 'board': BoardView.render(filters); break;
       case 'project': ProjectView.render(filters); break;
+      case 'validation': renderValidationView(); break;
     }
     renderSidebarLists();
   }
@@ -355,6 +368,130 @@ const App = (() => {
   function closeFilterMenu() {
     const menu = document.getElementById('filter-menu');
     if (menu) menu.classList.remove('open');
+  }
+
+  // ── Validation Actions View ──
+  function renderValidationView() {
+    const container = document.getElementById('view-container');
+    if (!container) return;
+    const defs = Store.getValidationActionDefs();
+    const tasks = Store.getTasks();
+
+    // Collect all unique VA IDs from tasks
+    const vaIds = new Set();
+    tasks.forEach(t => (t.validationActions || []).forEach(va => vaIds.add(va)));
+
+    // Auto-create defs for VA IDs that don't have one yet
+    const existingNames = new Set(defs.map(d => d.name));
+    vaIds.forEach(vaId => {
+      if (!existingNames.has(vaId)) {
+        Store.addValidationActionDef({ name: vaId, description: '' });
+      }
+    });
+    // Re-read after potential additions
+    const allDefs = Store.getValidationActionDefs();
+
+    // Build linked tasks map: vaName -> [task titles]
+    const linkedMap = {};
+    allDefs.forEach(d => { linkedMap[d.name] = []; });
+    tasks.forEach(t => {
+      (t.validationActions || []).forEach(va => {
+        if (linkedMap[va]) linkedMap[va].push(t.title);
+      });
+    });
+
+    container.innerHTML = `
+      <div class="va-view">
+        <div class="va-header">
+          <h2 class="va-title">Validation Actions</h2>
+          <button class="btn btn-primary" onclick="App.addValidationActionDef()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add Validation Action
+          </button>
+        </div>
+        ${allDefs.length === 0 ? `
+        <div class="va-empty">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3;margin-bottom:12px;"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <p>No validation actions yet.</p>
+          <p style="font-size:12px;color:var(--text-muted);">Assign validation actions to tasks and they will appear here, or add new ones.</p>
+        </div>` : `
+        <div class="va-table-wrap">
+          <table class="va-table">
+            <thead>
+              <tr>
+                <th style="width:160px;">Action ID</th>
+                <th>Description</th>
+                <th style="width:100px;">Linked Tasks</th>
+                <th style="width:80px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allDefs.map(def => {
+                const linked = linkedMap[def.name] || [];
+                return `
+                <tr data-va-id="${def.id}">
+                  <td>
+                    <span class="va-action-badge">Action - ${esc(def.name)}</span>
+                  </td>
+                  <td>
+                    <textarea class="va-inline-textarea" rows="2"
+                              onchange="App.updateVAField('${def.id}', 'description', this.value)"
+                              placeholder="Describe this validation action...">${esc(def.description)}</textarea>
+                  </td>
+                  <td style="text-align:center;">
+                    <span class="badge" title="${esc(linked.join(', '))}">${linked.length}</span>
+                  </td>
+                  <td style="text-align:center;">
+                    <button class="btn-icon" onclick="App.deleteValidationActionDef('${def.id}')" title="Delete">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    </button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>`;
+  }
+
+  async function addValidationActionDef() {
+    const result = await Modal.show({
+      title: 'New Validation Action',
+      fields: [
+        { type: 'text', key: 'name', label: 'Action ID', placeholder: 'e.g. 1234', autofocus: true },
+        { type: 'textarea', key: 'description', label: 'Description', placeholder: 'Describe what this validation action involves...' }
+      ],
+      confirmText: 'Add'
+    });
+    if (!result || !result.name) return;
+    // Check for duplicate
+    const existing = Store.getValidationActionDefs().find(d => d.name === result.name);
+    if (existing) {
+      toast('Validation action "' + result.name + '" already exists', 'error');
+      return;
+    }
+    Store.addValidationActionDef(result);
+    toast('Validation action added', 'success');
+  }
+
+  function updateVAField(id, field, value) {
+    Store.updateValidationActionDef(id, { [field]: value });
+  }
+
+  async function deleteValidationActionDef(id) {
+    const def = Store.getValidationActionDef(id);
+    const tasks = Store.getTasks();
+    const linkedCount = tasks.filter(t => (t.validationActions || []).includes(def?.name)).length;
+    const msg = linkedCount > 0
+      ? `This validation action is linked to ${linkedCount} task(s). Delete the description? (Tasks will keep the reference.)`
+      : 'Delete this validation action description?';
+    const confirmed = await Modal.confirm({
+      title: 'Delete Validation Action',
+      message: msg
+    });
+    if (!confirmed) return;
+    Store.deleteValidationActionDef(id);
+    toast('Validation action deleted', 'info');
   }
 
   async function quickAddTask() {
@@ -740,6 +877,7 @@ const App = (() => {
     addMember, addLabel, addProjectGroup, addGroup, addPipeline,
     editPipeline, removePipeline, toggleProjectGroupVisibility, toggleProjectVisibility,
     removeMember, removeLabel, removeProjectGroup, removeGroup,
+    addValidationActionDef, updateVAField, deleteValidationActionDef,
     toggleTheme, openFile, importFile, loadSample, newProject,
     handleDrop, handleFileSelect, closeProject, toast
   };

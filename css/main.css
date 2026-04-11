@@ -908,3 +908,81 @@ a { color: var(--accent); text-decoration: none; }
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ===== View Tabs ===== */
+.view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+.view-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.view-tab:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.view-tab.active { background: var(--accent-subtle); color: var(--accent); }
+.view-tab svg { flex-shrink: 0; }
+
+/* ===== Validation Actions View ===== */
+.va-view { padding: 24px; height: 100%; overflow-y: auto; }
+.va-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.va-title { font-size: 20px; font-weight: 600; }
+.va-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+.va-table-wrap { overflow-x: auto; }
+.va-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.va-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 2px solid var(--border-color);
+}
+.va-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+}
+.va-table tr:hover td { background: var(--bg-tertiary); }
+.va-cell-id { font-family: monospace; font-size: 11px; color: var(--text-muted); }
+.va-inline-input,
+.va-inline-textarea {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+.va-inline-input:hover,
+.va-inline-textarea:hover { border-color: var(--border-color); }
+.va-inline-input:focus,
+.va-inline-textarea:focus { border-color: var(--accent); outline: none; background: var(--bg-primary); }
+.va-action-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #ef4444;
+  color: white;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}

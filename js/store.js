@@ -87,6 +87,7 @@ const Store = (() => {
 
   function load(jsonData) {
     if (!jsonData.projectGroups) jsonData.projectGroups = [];
+    if (!jsonData.validationActionDefs) jsonData.validationActionDefs = [];
     // Ensure groups have projectGroupId
     (jsonData.groups || []).forEach(g => { if (!g.projectGroupId) g.projectGroupId = ''; });
     data = jsonData;
@@ -100,6 +101,7 @@ const Store = (() => {
         data = JSON.parse(raw);
         // Backward compatibility
         if (!data.projectGroups) data.projectGroups = [];
+        if (!data.validationActionDefs) data.validationActionDefs = [];
         (data.groups || []).forEach(g => { if (!g.projectGroupId) g.projectGroupId = ''; });
         return true;
       }
@@ -514,6 +516,41 @@ const Store = (() => {
     return tasks;
   }
 
+  // ── Validation Action Definitions ──
+  function getValidationActionDefs() { return data ? (data.validationActionDefs || []) : []; }
+  function getValidationActionDef(id) { return getValidationActionDefs().find(v => v.id === id); }
+
+  function addValidationActionDef(defData) {
+    if (!data.validationActionDefs) data.validationActionDefs = [];
+    const def = {
+      id: defData.id || createId(),
+      name: defData.name || '',
+      description: defData.description || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    data.validationActionDefs.push(def);
+    emit('validationActionDefAdded', def);
+    return def;
+  }
+
+  function updateValidationActionDef(id, updates) {
+    const def = getValidationActionDef(id);
+    if (!def) return null;
+    Object.assign(def, updates, { updatedAt: new Date().toISOString() });
+    emit('validationActionDefUpdated', def);
+    return def;
+  }
+
+  function deleteValidationActionDef(id) {
+    if (!data.validationActionDefs) return;
+    const idx = data.validationActionDefs.findIndex(v => v.id === id);
+    if (idx > -1) {
+      data.validationActionDefs.splice(idx, 1);
+      emit('validationActionDefDeleted', id);
+    }
+  }
+
   // Initialize with empty project
   function createEmpty(title) {
     load({
@@ -532,7 +569,8 @@ const Store = (() => {
       pipelines: [],
       tasks: [],
       groups: [],
-      projectGroups: []
+      projectGroups: [],
+      validationActionDefs: []
     });
   }
 
@@ -553,6 +591,7 @@ const Store = (() => {
     addPipeline, updatePipeline, deletePipeline,
     addMember, deleteMember, addLabel, deleteLabel,
     addGroup, updateGroup, deleteGroup,
+    getValidationActionDefs, getValidationActionDef, addValidationActionDef, updateValidationActionDef, deleteValidationActionDef,
     filterTasks, createEmpty, createId
   };
 })();

@@ -88,7 +88,7 @@ const BoardView = (() => {
         <div class="task-card-labels">
           ${labels.map(l => `<span class="task-label" style="background:${l.color}">${esc(l.name)}</span>`).join('')}
         </div>` : ''}
-        <div class="task-card-title">${esc(task.title)}</div>
+        <div class="task-card-title" ondblclick="BoardView.editTitle(event, '${task.id}')">${esc(task.title)}</div>
         <div class="task-card-meta">
           <div class="task-card-avatars">
             ${assignees.map(m => `<span class="avatar" style="background:${m.color}" title="${esc(m.name)}">${initials(m.name)}</span>`).join('')}
@@ -200,5 +200,32 @@ const BoardView = (() => {
     return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
-  return { init, render, onDragStart, onDragOver, onDragLeave, onDrop, addTask, addBucket, renameBucket, removeBucket };
+  function editTitle(e, taskId) {
+    e.stopPropagation();
+    const el = e.currentTarget;
+    const task = Store.getTask(taskId);
+    if (!task) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = task.title;
+    input.className = 'task-card-title-input';
+    input.style.cssText = 'width:100%;font-size:inherit;font-weight:inherit;border:1px solid var(--accent);border-radius:4px;padding:2px 4px;background:var(--surface);color:var(--text-primary);outline:none;';
+    el.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = () => {
+      const newTitle = input.value.trim();
+      if (newTitle && newTitle !== task.title) {
+        Store.updateTask(taskId, { title: newTitle });
+      }
+      render();
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = task.title; input.blur(); }
+    });
+  }
+
+  return { init, render, onDragStart, onDragOver, onDragLeave, onDrop, addTask, addBucket, renameBucket, removeBucket, editTitle };
 })();

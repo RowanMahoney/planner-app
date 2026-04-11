@@ -8,7 +8,7 @@ const TaskPanel = (() => {
   function init() {
     overlayEl = document.getElementById('panel-overlay');
     panelEl = document.getElementById('task-panel');
-    overlayEl.addEventListener('click', close);
+    // Overlay click does NOT close — only X button or Cancel closes the panel
   }
 
   function open(taskId) {
@@ -102,11 +102,17 @@ const TaskPanel = (() => {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-group">
             <label class="form-label">Start Date</label>
-            <input type="date" class="form-input" id="panel-start" value="${task.startDate || ''}" />
+            <div style="position:relative;">
+              <input type="text" class="form-input" id="panel-start-display" value="${isoToAU(task.startDate)}" placeholder="DD/MM/YYYY" readonly style="cursor:pointer;" />
+              <input type="date" id="panel-start" value="${task.startDate || ''}" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Due Date</label>
-            <input type="date" class="form-input" id="panel-due" value="${task.dueDate || ''}" />
+            <div style="position:relative;">
+              <input type="text" class="form-input" id="panel-due-display" value="${isoToAU(task.dueDate)}" placeholder="DD/MM/YYYY" readonly style="cursor:pointer;" />
+              <input type="date" id="panel-due" value="${task.dueDate || ''}" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
+            </div>
           </div>
         </div>
 
@@ -167,17 +173,6 @@ const TaskPanel = (() => {
         </div>
 
         <div class="form-group">
-          <label class="form-label">Dependencies</label>
-          <div class="chip-select" id="panel-deps">
-            ${Store.getTasks().filter(t => t.id !== task.id).map(t => `
-              <span class="chip ${task.dependencies.includes(t.id) ? 'selected' : ''}"
-                    data-id="${t.id}" onclick="TaskPanel.toggleDep('${t.id}')">
-                ${escHTML(t.title.substring(0, 30))}${t.title.length > 30 ? '...' : ''}
-              </span>`).join('')}
-          </div>
-        </div>
-
-        <div class="form-group">
           <label class="form-label">Validation Actions</label>
           <div id="panel-validation-actions">
             ${(task.validationActions || []).map((va, i) => `
@@ -218,6 +213,22 @@ const TaskPanel = (() => {
       });
     }
 
+    // Sync hidden date pickers with display fields
+    const startDateInput = document.getElementById('panel-start');
+    const startDisplay = document.getElementById('panel-start-display');
+    if (startDateInput && startDisplay) {
+      startDateInput.addEventListener('change', () => {
+        startDisplay.value = isoToAU(startDateInput.value);
+      });
+    }
+    const dueDateInput = document.getElementById('panel-due');
+    const dueDisplay = document.getElementById('panel-due-display');
+    if (dueDateInput && dueDisplay) {
+      dueDateInput.addEventListener('change', () => {
+        dueDisplay.value = isoToAU(dueDateInput.value);
+      });
+    }
+
     const pipelineSelect = document.getElementById('panel-pipeline');
     if (pipelineSelect) {
       pipelineSelect.addEventListener('change', () => {
@@ -251,9 +262,6 @@ const TaskPanel = (() => {
     updates.assignees = [...document.querySelectorAll('#panel-assignees .chip.selected')].map(c => c.dataset.id);
     // Collect labels
     updates.labels = [...document.querySelectorAll('#panel-labels .chip.selected')].map(c => c.dataset.id);
-    // Collect dependencies
-    updates.dependencies = [...document.querySelectorAll('#panel-deps .chip.selected')].map(c => c.dataset.id);
-
     // Handle group (project) assignment
     const groupEl = document.getElementById('panel-group');
     if (groupEl) {
@@ -372,8 +380,14 @@ const TaskPanel = (() => {
 
   function formatDate(d) {
     if (!d) return '';
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return new Date(d).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
-  return { init, open, close, save, toggleAssignee, toggleLabel, toggleDep, toggleCheck, addCheck, removeCheck, addValidationAction, removeValidationAction, deleteTask };
+  function isoToAU(isoDate) {
+    if (!isoDate) return '';
+    const [y, m, d] = isoDate.split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  return { init, open, close, save, toggleAssignee, toggleLabel, toggleCheck, addCheck, removeCheck, addValidationAction, removeValidationAction, deleteTask };
 })();
