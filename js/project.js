@@ -620,7 +620,7 @@ const ProjectView = (() => {
       const taskLevel = row.level || 5;
       return `<div class="pv-row pv-level-${taskLevel}" style="height:${ROW_H[taskLevel]}px;padding-left:${INDENT[taskLevel]}px;" onmouseenter="ProjectView.showTaskTooltip(event,'${t.id}')" onmousemove="ProjectView.moveTaskTooltip(event)" onmouseleave="ProjectView.hideTaskTooltip()" onclick="TaskPanel.open('${t.id}')">
         <span class="priority-dot" style="background:${pc};"></span>
-        <span class="task-name" ondblclick="ProjectView.editTaskTitle(event, '${t.id}')">${esc(t.title)}</span>
+        <span class="task-name">${esc(t.title)}</span>
         ${assigneeHtml}
       </div>`;
     }
@@ -672,7 +672,11 @@ const ProjectView = (() => {
     return `<div class="pv-row ${levelClass} ${isCollapsed ? 'is-collapsed' : ''}" style="${rowFlex}height:${h}px;padding-left:${indent}px;padding-right:12px;${divider}" onclick="ProjectView.toggle('${colKey}')">
       ${icon}
       <span class="pv-color-dot" style="background:${row.color};"></span>
-      <span class="pv-row-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(row.name)}</span>
+      <span class="pv-row-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"${
+        !exporting && (row.type === 'project-group' || row.type === 'project')
+          ? ` onclick="event.stopPropagation();ProjectView.editRowName(event,'${row.type}','${row.id}')"`
+          : ''
+      }>${esc(row.name)}</span>
       ${addBtn}
       ${badge}
       ${staffBadge}
@@ -1412,36 +1416,39 @@ ${inlinedCSS}
     return d.toISOString().slice(0, 10);
   }
 
+  // Format a local Date as YYYY-MM-DD without UTC shift
+  function toLocalISO(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
   // Snap pixel to the nearest 1st-of-month (for bar start/left edge)
+  // Returns { px, date } where date is the 1st of that month (YYYY-MM-DD)
   function snapToMonthStart(px) {
     const days = px / cellWidth;
     const d = new Date(timelineStartDate);
     d.setDate(d.getDate() + Math.round(days));
     const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
     const nextMonthStart = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-    const snappedDate = Math.abs(d - monthStart) <= Math.abs(d - nextMonthStart) ? monthStart : nextMonthStart;
-    return Math.round((snappedDate - timelineStartDate) / (1000 * 60 * 60 * 24)) * cellWidth;
+    const snapped = Math.abs(d - monthStart) <= Math.abs(d - nextMonthStart) ? monthStart : nextMonthStart;
+    const snapDays = Math.round((snapped - timelineStartDate) / (1000 * 60 * 60 * 24));
+    return { px: snapDays * cellWidth, date: toLocalISO(snapped) };
   }
 
   // Snap pixel to the nearest last-day-of-month (for bar end/right edge)
+  // Returns { px, date } where px is the right edge and date is the last day of that month
   function snapToMonthEnd(px) {
     const days = px / cellWidth;
     const d = new Date(timelineStartDate);
     d.setDate(d.getDate() + Math.round(days));
-    // Last day of current month and last day of previous month
     const endOfThisMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
     const endOfPrevMonth = new Date(d.getFullYear(), d.getMonth(), 0);
-    const snappedDate = Math.abs(d - endOfThisMonth) <= Math.abs(d - endOfPrevMonth) ? endOfThisMonth : endOfPrevMonth;
-    // Pixel position is the right edge of that day, so +1 day worth of px
-    const snapDays = Math.round((snappedDate - timelineStartDate) / (1000 * 60 * 60 * 24));
-    return (snapDays + 1) * cellWidth;
-  }
-
-  function pxToDateAt(px) {
-    const days = Math.round(px / cellWidth);
-    const d = new Date(timelineStartDate);
-    d.setDate(d.getDate() + days);
-    return d.toISOString().slice(0, 10);
+    const snapped = Math.abs(d - endOfThisMonth) <= Math.abs(d - endOfPrevMonth) ? endOfThisMonth : endOfPrevMonth;
+    const snapDays = Math.round((snapped - timelineStartDate) / (1000 * 60 * 60 * 24));
+    // Right edge is one day past the last day (visually includes the full last day)
+    return { px: (snapDays + 1) * cellWidth, date: toLocalISO(snapped) };
   }
 
   function barClick(e, taskId) {
@@ -1460,32 +1467,27 @@ ${inlinedCSS}
     if (!task) return;
 
     const startX = e.clientX;
-    const origLeft = parseInt(bar.style.left);
-    const origWidth = parseInt(bar.style.width);
+    const origLeft = parseFloat(bar.style.left);
+    const origWidth = parseFloat(bar.style.width);
 
+    let snapStart = null, snapEnd = null;
     dragState = { taskId, moved: false, bar, origLeft, origWidth, startX, type: 'move' };
 
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       if (Math.abs(dx) > 3) dragState.moved = true;
-      const snappedLeft = snapToMonthStart(origLeft + dx);
-      const snappedRight = snapToMonthEnd(origLeft + origWidth + dx);
-      bar.style.left = snappedLeft + 'px';
-      bar.style.width = Math.max(cellWidth, snappedRight - snappedLeft) + 'px';
+      snapStart = snapToMonthStart(origLeft + dx);
+      snapEnd = snapToMonthEnd(origLeft + origWidth + dx);
+      bar.style.left = snapStart.px + 'px';
+      bar.style.width = Math.max(cellWidth, snapEnd.px - snapStart.px) + 'px';
     };
 
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      if (!dragState.moved) { dragState = null; return; }
+      if (!dragState.moved || !snapStart || !snapEnd) { dragState = null; return; }
 
-      const newLeft = parseInt(bar.style.left);
-      const newWidth = parseInt(bar.style.width);
-      const newStart = pxToDateAt(newLeft);
-      // End is the last day within the bar (right edge px - 1 day)
-      const newEnd = pxToDateAt(newLeft + newWidth - cellWidth);
-
-      Store.updateTask(taskId, { startDate: newStart, dueDate: newEnd });
+      Store.updateTask(taskId, { startDate: snapStart.date, dueDate: snapEnd.date });
       dragState = null;
     };
 
@@ -1503,9 +1505,10 @@ ${inlinedCSS}
     if (!bar || !task) return;
 
     const startX = e.clientX;
-    const origLeft = parseInt(bar.style.left);
-    const origWidth = parseInt(bar.style.width);
+    const origLeft = parseFloat(bar.style.left);
+    const origWidth = parseFloat(bar.style.width);
 
+    let snapStart = null, snapEnd = null;
     dragState = { taskId, moved: false, bar, origLeft, origWidth, startX, type: 'resize', side };
 
     const onMove = (ev) => {
@@ -1513,16 +1516,15 @@ ${inlinedCSS}
       if (Math.abs(dx) > 3) dragState.moved = true;
       if (side === 'right') {
         // Snap right edge to end-of-month
-        const rawRight = origLeft + origWidth + dx;
-        const snappedRight = snapToMonthEnd(rawRight);
-        const newWidth = snappedRight - origLeft;
+        snapEnd = snapToMonthEnd(origLeft + origWidth + dx);
+        const newWidth = snapEnd.px - origLeft;
         bar.style.width = Math.max(cellWidth, newWidth) + 'px';
       } else {
         // Snap left edge to 1st-of-month
-        const snappedLeft = snapToMonthStart(origLeft + dx);
-        const newWidth = origLeft + origWidth - snappedLeft;
+        snapStart = snapToMonthStart(origLeft + dx);
+        const newWidth = origLeft + origWidth - snapStart.px;
         if (newWidth >= cellWidth) {
-          bar.style.left = snappedLeft + 'px';
+          bar.style.left = snapStart.px + 'px';
           bar.style.width = newWidth + 'px';
         }
       }
@@ -1533,12 +1535,11 @@ ${inlinedCSS}
       document.removeEventListener('mouseup', onUp);
       if (!dragState.moved) { dragState = null; return; }
 
-      const newLeft = parseInt(bar.style.left);
-      const newWidth = parseInt(bar.style.width);
-      const newStart = pxToDateAt(newLeft);
-      const newEnd = pxToDateAt(newLeft + newWidth - cellWidth);
+      // For the side that wasn't resized, read the current task dates
+      const startDate = snapStart ? snapStart.date : task.startDate;
+      const dueDate = snapEnd ? snapEnd.date : task.dueDate;
 
-      Store.updateTask(taskId, { startDate: newStart, dueDate: newEnd });
+      Store.updateTask(taskId, { startDate, dueDate });
       dragState = null;
     };
 
@@ -1550,31 +1551,27 @@ ${inlinedCSS}
   function dayDiff(from, to) { return Math.floor((to - from) / (1000 * 60 * 60 * 24)); }
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-  function editTaskTitle(e, taskId) {
-    e.stopPropagation();
-    const el = e.currentTarget;
-    const task = Store.getTask(taskId);
-    if (!task) return;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = task.title;
-    input.style.cssText = 'width:100%;font-size:inherit;font-weight:inherit;border:1px solid var(--accent);border-radius:4px;padding:1px 4px;background:var(--surface);color:var(--text-primary);outline:none;';
-    el.replaceWith(input);
-    input.focus();
-    input.select();
-    const commit = () => {
-      const newTitle = input.value.trim();
-      if (newTitle && newTitle !== task.title) {
-        Store.updateTask(taskId, { title: newTitle });
-      }
-      render();
-    };
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-      if (ev.key === 'Escape') { input.value = task.title; input.blur(); }
+  async function editRowName(e, type, id) {
+    let currentName = '';
+    let label = 'Name';
+    if (type === 'project-group') { const pg = Store.getProjectGroup(id); currentName = pg ? pg.name : ''; label = 'Project Group Name'; }
+    else if (type === 'project') { const g = Store.getGroup(id); currentName = g ? g.name : ''; label = 'Project Name'; }
+    if (!currentName) return;
+
+    const result = await Modal.show({
+      title: 'Edit ' + label.replace(' Name', ''),
+      fields: [
+        { type: 'text', key: 'name', label, value: currentName, autofocus: true }
+      ],
+      confirmText: 'Save'
     });
+    if (!result || !result.name || result.name.trim() === currentName) return;
+    const newName = result.name.trim();
+    if (type === 'project-group') Store.updateProjectGroup(id, { name: newName });
+    else if (type === 'project') Store.updateGroup(id, { name: newName });
+    App.toast('Updated', 'success');
+    render();
   }
 
-  return { init, render, onSliderZoom, stepZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggleProjectVisibility, isProjectVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip, editTaskTitle };
+  return { init, render, onSliderZoom, stepZoom, fitToView, setProjectFilter, toggleProjectFilter, toggleFilterDropdown, toggleProjectGroupVisibility, isProjectGroupVisible, toggleProjectVisibility, isProjectVisible, toggle, collapseAll, collapseToProjects, expandAll, exportView, quickAddToProject, quickAddProjectToGroup, quickAddToPhase, quickAddToStage, barClick, startDrag, startResize, showTaskTooltip, moveTaskTooltip, hideTaskTooltip, editRowName };
 })();

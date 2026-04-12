@@ -28,7 +28,9 @@ const App = (() => {
     Store.on('projectGroupAdded', refreshView);
     Store.on('projectGroupUpdated', refreshView);
     Store.on('projectGroupDeleted', refreshView);
+    Store.on('memberUpdated', refreshView);
     Store.on('memberDeleted', refreshView);
+    Store.on('labelUpdated', refreshView);
     Store.on('labelDeleted', refreshView);
     Store.on('validationActionDefAdded', refreshView);
     Store.on('validationActionDefUpdated', refreshView);
@@ -241,7 +243,7 @@ const App = (() => {
       membersEl.innerHTML = Store.getMembers().map(m => `
         <div class="nav-item">
           <span style="width:20px;height:20px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:white;">${initials(m.name)}</span>
-          ${esc(m.name)}
+          <span class="sidebar-name" onclick="App.editSidebarName(event,'member','${m.id}')">${esc(m.name)}</span>
           <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeMember('${m.id}')" title="Remove member">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
@@ -254,7 +256,7 @@ const App = (() => {
       labelsEl.innerHTML = Store.getLabels().map(l => `
         <div class="nav-item">
           <span style="width:10px;height:10px;border-radius:50%;background:${l.color};flex-shrink:0;"></span>
-          ${esc(l.name)}
+          <span class="sidebar-name" onclick="App.editSidebarName(event,'label','${l.id}')">${esc(l.name)}</span>
           <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removeLabel('${l.id}')" title="Remove label">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
@@ -268,7 +270,7 @@ const App = (() => {
         const visible = ProjectView.isProjectGroupVisible(pg.id);
         return `<div class="nav-item" style="cursor:pointer;">
           <span style="width:10px;height:10px;border-radius:3px;background:${pg.color};flex-shrink:0;"></span>
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pg.name)}</span>
+          <span class="sidebar-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" onclick="App.editSidebarName(event,'projectGroup','${pg.id}')">${esc(pg.name)}</span>
           <button class="btn-icon sidebar-eye" onclick="event.stopPropagation();App.toggleProjectGroupVisibility('${pg.id}')" title="${visible ? 'Hide in project view' : 'Show in project view'}" style="flex-shrink:0;opacity:${visible ? '0.7' : '0.3'};">
             ${visible
               ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
@@ -290,7 +292,7 @@ const App = (() => {
         const visible = ProjectView.isProjectVisible(g.id);
         return `<div class="nav-item" style="cursor:pointer;">
           <span style="width:10px;height:10px;border-radius:3px;background:${g.color};flex-shrink:0;"></span>
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(g.name)}</span>
+          <span class="sidebar-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" onclick="App.editSidebarName(event,'group','${g.id}')">${esc(g.name)}</span>
           <button class="btn-icon sidebar-eye" onclick="event.stopPropagation();App.toggleProjectVisibility('${g.id}')" title="${visible ? 'Hide in project view' : 'Show in project view'}" style="flex-shrink:0;opacity:${visible ? '0.7' : '0.3'};">
             ${visible
               ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
@@ -310,7 +312,7 @@ const App = (() => {
       pipEl.innerHTML = Store.getPipelines().map(p => `
         <div class="nav-item">
           <span style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0;"></span>
-          ${esc(p.name)}
+          <span class="sidebar-name" onclick="App.editSidebarName(event,'pipeline','${p.id}')">${esc(p.name)}</span>
           <span class="badge" style="margin-left:auto;">${p.stages.length}</span>
           <button class="btn-icon sidebar-remove" onclick="event.stopPropagation();App.removePipeline('${p.id}')" title="Remove phase">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -865,6 +867,34 @@ const App = (() => {
   function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
   function initials(n) { return (n||'').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2); }
 
+  async function editSidebarName(e, type, id) {
+    e.stopPropagation();
+    if (type === 'pipeline') { editPipeline(id); return; }
+
+    let currentName = '';
+    let label = 'Name';
+    if (type === 'member') { const m = Store.getMember(id); currentName = m ? m.name : ''; label = 'Member Name'; }
+    else if (type === 'label') { const l = Store.getLabel(id); currentName = l ? l.name : ''; label = 'Label Name'; }
+    else if (type === 'projectGroup') { const pg = Store.getProjectGroup(id); currentName = pg ? pg.name : ''; label = 'Project Group Name'; }
+    else if (type === 'group') { const g = Store.getGroup(id); currentName = g ? g.name : ''; label = 'Project Name'; }
+    if (!currentName) return;
+
+    const result = await Modal.show({
+      title: 'Edit ' + label.replace(' Name', ''),
+      fields: [
+        { type: 'text', key: 'name', label, value: currentName, autofocus: true }
+      ],
+      confirmText: 'Save'
+    });
+    if (!result || !result.name || result.name.trim() === currentName) return;
+    const newName = result.name.trim();
+    if (type === 'member') Store.updateMember(id, { name: newName });
+    else if (type === 'label') Store.updateLabel(id, { name: newName });
+    else if (type === 'projectGroup') Store.updateProjectGroup(id, { name: newName });
+    else if (type === 'group') Store.updateGroup(id, { name: newName });
+    toast('Updated', 'success');
+  }
+
   // Close menus on outside click
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.dropdown')) closeFilterMenu();
@@ -878,6 +908,7 @@ const App = (() => {
     editPipeline, removePipeline, toggleProjectGroupVisibility, toggleProjectVisibility,
     removeMember, removeLabel, removeProjectGroup, removeGroup,
     addValidationActionDef, updateVAField, deleteValidationActionDef,
+    editSidebarName,
     toggleTheme, openFile, importFile, loadSample, newProject,
     handleDrop, handleFileSelect, closeProject, toast
   };

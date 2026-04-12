@@ -400,6 +400,14 @@ const Store = (() => {
     return member;
   }
 
+  function updateMember(id, updates) {
+    const member = data.members.find(m => m.id === id);
+    if (!member) return null;
+    Object.assign(member, updates);
+    emit('memberUpdated', member);
+    return member;
+  }
+
   function deleteMember(id) {
     const idx = data.members.findIndex(m => m.id === id);
     if (idx === -1) return false;
@@ -418,6 +426,14 @@ const Store = (() => {
     const label = { id: createId(), name, color: color || '#6b7280' };
     data.labels.push(label);
     emit('labelAdded', label);
+    return label;
+  }
+
+  function updateLabel(id, updates) {
+    const label = data.labels.find(l => l.id === id);
+    if (!label) return null;
+    Object.assign(label, updates);
+    emit('labelUpdated', label);
     return label;
   }
 
@@ -589,7 +605,7 @@ const Store = (() => {
     addTask, updateTask, deleteTask,
     addBucket, updateBucket, deleteBucket,
     addPipeline, updatePipeline, deletePipeline,
-    addMember, deleteMember, addLabel, deleteLabel,
+    addMember, updateMember, deleteMember, addLabel, updateLabel, deleteLabel,
     addGroup, updateGroup, deleteGroup,
     getValidationActionDefs, getValidationActionDef, addValidationActionDef, updateValidationActionDef, deleteValidationActionDef,
     filterTasks, createEmpty, createId

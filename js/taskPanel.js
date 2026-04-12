@@ -8,7 +8,7 @@ const TaskPanel = (() => {
   function init() {
     overlayEl = document.getElementById('panel-overlay');
     panelEl = document.getElementById('task-panel');
-    // Overlay click does NOT close — only X button or Cancel closes the panel
+    overlayEl.addEventListener('click', close);
   }
 
   function open(taskId) {
@@ -49,7 +49,7 @@ const TaskPanel = (() => {
       <div class="panel-body">
         <div class="form-group">
           <input class="form-input" id="panel-title" value="${escHTML(task.title)}"
-                 style="font-size:16px;font-weight:600;border:none;background:transparent;padding:0;"
+                 style="font-size:16px;font-weight:600;"
                  placeholder="Task title" />
         </div>
 
@@ -102,17 +102,11 @@ const TaskPanel = (() => {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-group">
             <label class="form-label">Start Date</label>
-            <div style="position:relative;">
-              <input type="text" class="form-input" id="panel-start-display" value="${isoToAU(task.startDate)}" placeholder="DD/MM/YYYY" readonly style="cursor:pointer;" />
-              <input type="date" id="panel-start" value="${task.startDate || ''}" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
-            </div>
+            <input type="date" class="form-input" id="panel-start" value="${task.startDate || ''}" />
           </div>
           <div class="form-group">
             <label class="form-label">Due Date</label>
-            <div style="position:relative;">
-              <input type="text" class="form-input" id="panel-due-display" value="${isoToAU(task.dueDate)}" placeholder="DD/MM/YYYY" readonly style="cursor:pointer;" />
-              <input type="date" id="panel-due" value="${task.dueDate || ''}" style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;" />
-            </div>
+            <input type="date" class="form-input" id="panel-due" value="${task.dueDate || ''}" />
           </div>
         </div>
 
@@ -210,22 +204,6 @@ const TaskPanel = (() => {
       progressInput.addEventListener('input', (e) => {
         const label = progressInput.closest('.form-group').querySelector('.form-label');
         label.textContent = `Progress (${e.target.value}%)`;
-      });
-    }
-
-    // Sync hidden date pickers with display fields
-    const startDateInput = document.getElementById('panel-start');
-    const startDisplay = document.getElementById('panel-start-display');
-    if (startDateInput && startDisplay) {
-      startDateInput.addEventListener('change', () => {
-        startDisplay.value = isoToAU(startDateInput.value);
-      });
-    }
-    const dueDateInput = document.getElementById('panel-due');
-    const dueDisplay = document.getElementById('panel-due-display');
-    if (dueDateInput && dueDisplay) {
-      dueDateInput.addEventListener('change', () => {
-        dueDisplay.value = isoToAU(dueDateInput.value);
       });
     }
 
@@ -383,11 +361,6 @@ const TaskPanel = (() => {
     return new Date(d).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
-  function isoToAU(isoDate) {
-    if (!isoDate) return '';
-    const [y, m, d] = isoDate.split('-');
-    return `${d}/${m}/${y}`;
-  }
 
   return { init, open, close, save, toggleAssignee, toggleLabel, toggleCheck, addCheck, removeCheck, addValidationAction, removeValidationAction, deleteTask };
 })();
